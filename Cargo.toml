@@ -1,0 +1,15 @@
+[package]
+name = "make-archive"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+async-trait = "0.1.88"
+clap = { version = "4.5.38", features = ["derive"] }
+tempfile = "3.20.0"
+tokio = { version = "1.45.1", features = ["full"] }
+
+[dev-dependencies]
+indicatif = "0.17.11"
+tempfile = "3.20.0"
