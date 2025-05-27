@@ -1,0 +1,8 @@
+test_files\test1.txt
+test_files\nested\cache\data.tmp
+test_files\nested\cache\data.txt
+test_files\deep\very\nested\folder\cache_settings.json
+test_files\important\document.pdf
+!*.tmp
+!*cache*
+test_files\test2.txt

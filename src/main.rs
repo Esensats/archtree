@@ -1,5 +1,7 @@
 mod archiver;
 mod config;
+mod display;
+mod exclusion;
 mod input;
 mod service;
 mod validator;
@@ -9,6 +11,7 @@ use anyhow::Result;
 use archiver::{Archiver, SevenZipArchiver};
 use clap::Parser;
 use config::Config;
+use exclusion::{ExclusionService, WildcardMatcher};
 use input::{FileReader, StdinReader};
 use service::BackupService;
 use validator::{FileSystemValidator, PathValidator};
@@ -16,7 +19,7 @@ use verifier::{SevenZipVerifier, VerificationService};
 
 #[derive(Parser)]
 #[command(
-    name = "make-archive",
+    name = "archtree",
     about = "A PowerShell-compatible backup tool that creates compressed archives using 7-Zip",
     version = "1.0.0"
 )]
@@ -110,7 +113,17 @@ async fn verify_only_mode(archive_path: &str, args: &Args, config: &Config) -> R
         None => Box::new(StdinReader::new()),
     };
 
-    let input_paths = reader.read_paths().await?;
+    let raw_input_paths = reader.read_paths().await?;
+
+    // Apply exclusion patterns to get the actual paths that should be in the archive
+    let exclusion_service = ExclusionService::new(WildcardMatcher::new());
+    let (input_paths, excluded_count) =
+        exclusion_service.apply_exclusions(&raw_input_paths).await?;
+
+    if excluded_count > 0 && config.show_progress {
+        println!("📝 Excluded {} patterns from verification.", excluded_count);
+    }
+
     verify_archive(archive_path, &input_paths, args, config).await
 }
 
@@ -146,9 +159,11 @@ async fn verify_archive(
 
     if !result.missing_files.is_empty() {
         println!("  ❌ Missing files: {}", result.missing_files.len());
-        for missing in &result.missing_files {
-            println!("    - {}", missing);
-        }
+
+        // Use strategy pattern to display missing files
+        // Currently using Strategy 2 (consolidated), but Strategy 1 (detailed) is available if needed
+        let display_context = display::MissingFileDisplayContext::with_consolidated_strategy();
+        display_context.display_missing_files(&result);
 
         // Offer to retry missing files
         if args.retry {

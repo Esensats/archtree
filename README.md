@@ -75,31 +75,31 @@ cargo build --release
 
 ```powershell
 # Basic usage (reads from stdin)
-Get-Content paths.txt | .\target\release\make-archive.exe
+Get-Content paths.txt | .\target\release\archtree.exe
 
 # Specify output path
-Get-Content paths.txt | .\target\release\make-archive.exe --output "C:\Backups\my-backup.7z"
+Get-Content paths.txt | .\target\release\archtree.exe --output "C:\Backups\my-backup.7z"
 
 # Read from file instead of stdin
-.\target\release\make-archive.exe --file paths.txt --output backup.7z
+.\target\release\archtree.exe --file paths.txt --output backup.7z
 
 # Quiet mode (no progress output)
-Get-Content paths.txt | .\target\release\make-archive.exe --quiet
+Get-Content paths.txt | .\target\release\archtree.exe --quiet
 
 # Custom 7-Zip path
-Get-Content paths.txt | .\target\release\make-archive.exe --7zip-path "C:\Tools\7z.exe"
+Get-Content paths.txt | .\target\release\archtree.exe --7zip-path "C:\Tools\7z.exe"
 
 # Verify archive contents after creation
-Get-Content paths.txt | .\target\release\make-archive.exe --verify
+Get-Content paths.txt | .\target\release\archtree.exe --verify
 
 # Verify and automatically retry missing files
-Get-Content paths.txt | .\target\release\make-archive.exe --verify --retry
+Get-Content paths.txt | .\target\release\archtree.exe --verify --retry
 
 # Verify an existing archive without creating a new one
-Get-Content paths.txt | .\target\release\make-archive.exe --verify-only "C:\Backups\existing.7z"
+Get-Content paths.txt | .\target\release\archtree.exe --verify-only "C:\Backups\existing.7z"
 
 # Show help
-.\target\release\make-archive.exe --help
+.\target\release\archtree.exe --help
 ```
 
 ### PowerShell Compatibility
@@ -109,10 +109,10 @@ The Rust version is fully compatible with the PowerShell version:
 ```powershell
 # Environment variable support (same as PowerShell version)
 $env:TEST_ARCHIVE_PATH = "C:\Backups\backup-$(Get-Date -Format 'yyyy-MM-dd').7z"
-Get-Content paths.txt | .\target\release\make-archive.exe
+Get-Content paths.txt | .\target\release\archtree.exe
 
 # Drop-in replacement for PowerShell script
-Get-Content paths.txt | .\target\release\make-archive.exe  # Instead of .\make-archive.ps1
+Get-Content paths.txt | .\target\release\archtree.exe
 ```
 
 ## Archive Verification 🔍
@@ -134,7 +134,7 @@ Verify archive contents immediately after creation:
 
 ```powershell
 # Create archive and verify in one step
-Get-Content paths.txt | .\target\release\make-archive.exe --verify
+Get-Content paths.txt | .\target\release\archtree.exe --verify
 
 # Example output:
 # ✅ Archive created successfully at: backup.7z
@@ -149,7 +149,7 @@ Automatically attempt to add missing files:
 
 ```powershell
 # Verify and retry missing files
-Get-Content paths.txt | .\target\release\make-archive.exe --verify --retry
+Get-Content paths.txt | .\target\release\archtree.exe --verify --retry
 
 # Example output with missing files:
 # ✅ Archive created successfully at: backup.7z
@@ -170,10 +170,10 @@ Verify an existing archive without creating a new one:
 
 ```powershell
 # Verify existing archive
-Get-Content original_paths.txt | .\target\release\make-archive.exe --verify-only "C:\Backups\archive.7z"
+Get-Content original_paths.txt | .\target\release\archtree.exe --verify-only "C:\Backups\archive.7z"
 
 # Or from stdin
-Get-Content paths.txt | .\target\release\make-archive.exe --verify-only "archive.7z"
+Get-Content paths.txt | .\target\release\archtree.exe --verify-only "archive.7z"
 ```
 
 ### Use Cases
@@ -225,7 +225,7 @@ This handles common scenarios where:
 ### Command Line Options
 
 ```
-make-archive [OPTIONS]
+archtree [OPTIONS]
 
 OPTIONS:
     -f, --file <FILE>           Input file containing paths (reads from stdin if not provided)
@@ -249,9 +249,6 @@ cargo test
 
 # Run with verbose output
 cargo test -- --nocapture
-
-# Run integration tests
-.\test-rust-make-archive.ps1
 ```
 
 ### Test Coverage
@@ -295,17 +292,16 @@ Tests use temporary directories and mock data to avoid:
 ### Project Structure
 
 ```
-rust/
-├── src/
-│   ├── main.rs          # CLI entry point and argument parsing
-│   ├── archiver.rs      # Archive creation trait and implementations
-│   ├── config.rs        # Configuration management
-│   ├── input.rs         # Input reading strategies
-│   ├── service.rs       # Main backup orchestration service
-│   ├── validator.rs     # Path validation logic
-│   └── verifier.rs      # Archive verification and retry logic
-├── Cargo.toml           # Dependencies and metadata
-└── Cargo.lock           # Dependency lock file
+src/
+│├── main.rs          # CLI entry point and argument parsing
+│├── archiver.rs      # Archive creation trait and implementations
+│├── config.rs        # Configuration management
+│├── input.rs         # Input reading strategies
+│├── service.rs       # Main backup orchestration service
+│├── validator.rs     # Path validation logic
+│└── verifier.rs      # Archive verification and retry logic
+Cargo.toml           # Dependencies and metadata
+Cargo.lock           # Dependency lock file
 ```
 
 ### Adding New Features
@@ -423,7 +419,7 @@ impl ArchiveVerifier for TarVerifier {
 winget install 7zip.7zip
 
 # Or specify custom path
-.\make-archive.exe --7zip-path "C:\Tools\7z.exe"
+.\archtree.exe --7zip-path "C:\Tools\7z.exe"
 ```
 
 **"Permission denied"**

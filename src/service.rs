@@ -2,6 +2,7 @@ use anyhow::Result;
 use crate::{
     archiver::Archiver,
     config::Config,
+    exclusion::{ExclusionService, WildcardMatcher},
     input::InputReader,
     validator::PathValidator,
 };
@@ -16,6 +17,7 @@ where
     validator: V,
     reader: Box<dyn InputReader>,
     config: Config,
+    exclusion_service: ExclusionService<WildcardMatcher>,
 }
 
 impl<A, V> BackupService<A, V>
@@ -30,13 +32,20 @@ where
             validator,
             reader,
             config,
+            exclusion_service: ExclusionService::new(WildcardMatcher::new()),
         }
     }
     
     /// Get input paths (useful for verification)
     pub async fn get_input_paths(&self) -> Result<Vec<String>> {
         let input_paths = self.reader.read_paths().await?;
-        let valid_paths = self.validator.validate_paths(&input_paths).await?;
+        let (filtered_paths, excluded_count) = self.exclusion_service.apply_exclusions(&input_paths).await?;
+        
+        if excluded_count > 0 && self.config.show_progress {
+            println!("📝 Excluded {} patterns from backup.", excluded_count);
+        }
+        
+        let valid_paths = self.validator.validate_paths(&filtered_paths).await?;
         Ok(valid_paths)
     }
     
@@ -58,13 +67,29 @@ where
             println!("No paths provided. Nothing to backup.");
             return Ok(());
         }
-        
+
         if self.config.show_progress {
-            println!("Validating {} paths...", input_paths.len());
+            println!("Processing {} input entries...", input_paths.len());
+        }
+
+        // Apply exclusion patterns
+        let (filtered_paths, excluded_count) = self.exclusion_service.apply_exclusions(&input_paths).await?;
+        
+        if excluded_count > 0 && self.config.show_progress {
+            println!("📝 Excluded {} patterns from backup.", excluded_count);
+        }
+        
+        if filtered_paths.is_empty() {
+            println!("No paths to backup after applying exclusions.");
+            return Ok(());
+        }
+
+        if self.config.show_progress {
+            println!("Validating {} paths...", filtered_paths.len());
         }
         
         // Validate paths
-        let valid_paths = self.validator.validate_paths(&input_paths).await?;
+        let valid_paths = self.validator.validate_paths(&filtered_paths).await?;
         
         if valid_paths.is_empty() {
             println!("No valid paths found. Nothing to backup.");
