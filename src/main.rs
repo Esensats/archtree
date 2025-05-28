@@ -3,6 +3,8 @@ mod config;
 mod display;
 mod exclusion;
 mod input;
+mod new_service;
+mod path_processor;
 mod service;
 mod validator;
 mod verification_service;
@@ -14,6 +16,7 @@ use clap::Parser;
 use config::Config;
 use input::{FileReader, StdinReader};
 use service::BackupService;
+use new_service::BackupService as NewBackupService;
 use validator::FileSystemValidator;
 use verification_service::{ConsoleCallback, VerificationAndRetryService, VerificationMode};
 use verifier::SevenZipVerifier;
@@ -52,6 +55,10 @@ struct Args {
     /// Only verify an existing archive without creating a new one
     #[arg(long = "verify-only")]
     verify_only: Option<String>,
+
+    /// Use the new improved path processing algorithm
+    #[arg(long = "new-algorithm")]
+    new_algorithm: bool,
 }
 
 #[tokio::main]
@@ -85,37 +92,72 @@ async fn main() -> Result<()> {
     };
 
     // Create and run backup service
-    let service = BackupService::new(archiver, validator, reader, config.clone());
-    service.run().await?;
+    if args.new_algorithm {
+        let new_service = NewBackupService::new(archiver, reader, config.clone());
+        new_service.run().await?;
+        
+        // Verify archive if requested
+        if args.verify {
+            let input_paths = new_service.get_input_paths().await?;
 
-    // Verify archive if requested
-    if args.verify {
-        let input_paths = service.get_input_paths().await?;
+            // Create components for verification
+            let verification_archiver = match &config.seven_zip_path {
+                Some(path) => SevenZipArchiver::with_path(path.clone()),
+                None => SevenZipArchiver::new(),
+            };
+            let verification_validator = FileSystemValidator::new();
+            let verifier = match &config.seven_zip_path {
+                Some(path) => SevenZipVerifier::with_path(path.clone()),
+                None => SevenZipVerifier::new(),
+            };
 
-        // Create components for verification
-        let verification_archiver = match &config.seven_zip_path {
-            Some(path) => SevenZipArchiver::with_path(path.clone()),
-            None => SevenZipArchiver::new(),
-        };
-        let verification_validator = FileSystemValidator::new();
-        let verifier = match &config.seven_zip_path {
-            Some(path) => SevenZipVerifier::with_path(path.clone()),
-            None => SevenZipVerifier::new(),
-        };
+            // Use the new verification service
+            let console_callback = ConsoleCallback::new(true); // Show progress for verification
 
-        // Use the new verification service
-        let console_callback = ConsoleCallback::new(true); // Show progress for verification
+            VerificationAndRetryService::verify(
+                &config.output_path,
+                &input_paths,
+                &verification_archiver,
+                &verification_validator,
+                &verifier,
+                VerificationMode::VerifyWithRetry,
+                console_callback,
+            )
+            .await?;
+        }
+    } else {
+        let service = BackupService::new(archiver, validator, reader, config.clone());
+        service.run().await?;
 
-        VerificationAndRetryService::verify(
-            &config.output_path,
-            &input_paths,
-            &verification_archiver,
-            &verification_validator,
-            &verifier,
-            VerificationMode::VerifyWithRetry,
-            console_callback,
-        )
-        .await?;
+        // Verify archive if requested
+        if args.verify {
+            let input_paths = service.get_input_paths().await?;
+
+            // Create components for verification
+            let verification_archiver = match &config.seven_zip_path {
+                Some(path) => SevenZipArchiver::with_path(path.clone()),
+                None => SevenZipArchiver::new(),
+            };
+            let verification_validator = FileSystemValidator::new();
+            let verifier = match &config.seven_zip_path {
+                Some(path) => SevenZipVerifier::with_path(path.clone()),
+                None => SevenZipVerifier::new(),
+            };
+
+            // Use the new verification service
+            let console_callback = ConsoleCallback::new(true); // Show progress for verification
+
+            VerificationAndRetryService::verify(
+                &config.output_path,
+                &input_paths,
+                &verification_archiver,
+                &verification_validator,
+                &verifier,
+                VerificationMode::VerifyWithRetry,
+                console_callback,
+            )
+            .await?;
+        }
     }
 
     Ok(())

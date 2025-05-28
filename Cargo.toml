@@ -10,6 +10,7 @@ clap = { version = "4.5.38", features = ["derive"] }
 regex = "1.11.1"
 tempfile = "3.20.0"
 tokio = { version = "1.45.1", features = ["full"] }
+walkdir = "2.5.0"
 
 [dev-dependencies]
 indicatif = "0.17.11"

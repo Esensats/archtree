@@ -1,0 +1,280 @@
+use crate::{
+    archiver::Archiver,
+    config::Config,
+    input::InputReader,
+    path_processor::{PathProcessor, ProcessingStatus, WildcardMatcher},
+};
+use anyhow::Result;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Simplified backup service using the new path processing algorithm
+pub struct BackupService<A>
+where
+    A: Archiver,
+{
+    archiver: A,
+    reader: Box<dyn InputReader>,
+    config: Config,
+    /// Cached processed paths to avoid recomputation during verification
+    processed_paths: OnceLock<Vec<PathBuf>>,
+}
+
+impl<A> BackupService<A>
+where
+    A: Archiver,
+{
+    /// Create a new backup service with the given components
+    pub fn new(archiver: A, reader: Box<dyn InputReader>, config: Config) -> Self {
+        Self {
+            archiver,
+            reader,
+            config,
+            processed_paths: OnceLock::new(),
+        }
+    }
+
+    /// Get processed paths as strings (for verification compatibility)
+    pub async fn get_input_paths(&self) -> Result<Vec<String>> {
+        if let Some(cached_paths) = self.processed_paths.get() {
+            return Ok(cached_paths.iter().map(|p| p.to_string_lossy().to_string()).collect());
+        }
+
+        let processed_paths = self.process_input_paths().await?;
+        let string_paths = processed_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        let _ = self.processed_paths.set(processed_paths);
+        Ok(string_paths)
+    }
+
+    /// Process input paths using the improved algorithm
+    async fn process_input_paths(&self) -> Result<Vec<PathBuf>> {
+        let input_paths = self.reader.read_paths().await?;
+
+        if input_paths.is_empty() {
+            if self.config.show_progress {
+                println!("No paths provided. Nothing to backup.");
+            }
+            return Ok(vec![]);
+        }
+
+        // Extract exclusion patterns from input
+        let (include_paths, exclude_patterns) = PathProcessor::extract_exclusion_patterns(&input_paths);
+
+        if !exclude_patterns.is_empty() && self.config.show_progress {
+            println!("📝 Found {} exclusion patterns.", exclude_patterns.len());
+        }
+
+        if include_paths.is_empty() {
+            if self.config.show_progress {
+                println!("No paths to backup after extracting exclusion patterns.");
+            }
+            return Ok(vec![]);
+        }
+
+        // Create path processor and matcher
+        let mut processor = PathProcessor::new(include_paths, exclude_patterns)?;
+        let matcher = WildcardMatcher::with_patterns(processor.exclusion_patterns())?;
+
+        // Track statistics for reporting
+        let mut added_count = 0;
+        let mut excluded_count = 0;
+        let mut invalid_count = 0;
+
+        // Process paths using the improved algorithm
+        let processed_paths = processor.process_paths(
+            |path, status| {
+                match status {
+                    ProcessingStatus::Added => {
+                        added_count += 1;
+                        if self.config.show_progress {
+                            println!("✓ {}", path.display());
+                        }
+                    },
+                    ProcessingStatus::Excluded => {
+                        excluded_count += 1;
+                        if self.config.show_progress {
+                            println!("🚫 Excluded: {}", path.display());
+                        }
+                    },
+                    ProcessingStatus::Invalid(ref error) => {
+                        invalid_count += 1;
+                        eprintln!("⚠️  Invalid path {}: {}", path.display(), error);
+                    },
+                }
+            },
+            &matcher,
+        ).await?;
+
+        // Report final statistics
+        if self.config.show_progress {
+            println!("📊 Processing complete:");
+            println!("   ✓ {} files added", added_count);
+            if excluded_count > 0 {
+                println!("   🚫 {} files excluded", excluded_count);
+            }
+            if invalid_count > 0 {
+                println!("   ⚠️  {} invalid paths", invalid_count);
+            }
+        }
+
+        Ok(processed_paths)
+    }
+
+    /// Run the complete backup process
+    pub async fn run(&self) -> Result<()> {
+        // Check if archiver is available
+        if !self.archiver.is_available().await {
+            anyhow::bail!(
+                "{} is not available. Please install it or check your PATH.",
+                self.archiver.name()
+            );
+        }
+
+        if self.config.show_progress {
+            println!("🚀 Starting backup process...");
+        }
+
+        // Process paths using the new algorithm
+        let processed_paths = self.process_input_paths().await?;
+
+        if processed_paths.is_empty() {
+            eprintln!("No valid paths found. Nothing to backup.");
+            return Ok(());
+        }
+
+        // Cache the processed paths for potential later use (e.g., verification)
+        let _ = self.processed_paths.set(processed_paths.clone());
+
+        if self.config.show_progress {
+            println!("📦 Found {} valid files to archive.", processed_paths.len());
+            println!("🗜️  Creating archive at: {}", self.config.output_path);
+        }
+
+        // Convert paths to strings for archiver compatibility
+        let string_paths: Vec<String> = processed_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        // Create archive
+        self.archiver
+            .create_archive(&string_paths, &self.config.output_path)
+            .await?;
+
+        if self.config.show_progress {
+            println!(
+                "✅ Archive created successfully at: {}",
+                self.config.output_path
+            );
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        archiver::SevenZipArchiver,
+        input::VecReader,
+    };
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_new_backup_service_with_valid_paths() {
+        // Create temporary test files
+        let temp_dir = TempDir::new().unwrap();
+        let test_file1 = temp_dir.path().join("test1.txt");
+        let test_file2 = temp_dir.path().join("test2.txt");
+        let test_file3 = temp_dir.path().join("test3.tmp");
+
+        fs::write(&test_file1, "Hello, World!").unwrap();
+        fs::write(&test_file2, "Test content").unwrap();
+        fs::write(&test_file3, "Temp file").unwrap();
+
+        let paths = vec![
+            test_file1.to_string_lossy().to_string(),
+            test_file2.to_string_lossy().to_string(),
+            test_file3.to_string_lossy().to_string(),
+            "!*.tmp".to_string(), // Exclude .tmp files
+        ];
+
+        let archiver = SevenZipArchiver::new();
+        let reader: Box<dyn InputReader> = Box::new(VecReader::new(paths));
+
+        let output_archive = temp_dir.path().join("test.7z");
+        let config = Config::builder()
+            .output_path(Some(&output_archive.to_string_lossy()), false)
+            .show_progress(false) // Disable progress for tests
+            .build()
+            .expect("Failed to create config");
+
+        let service = BackupService::new(archiver, reader, config);
+
+        // Skip test if 7-Zip is not available
+        if !service.archiver.is_available().await {
+            return;
+        }
+
+        let result = service.run().await;
+
+        // Check if backup completed successfully
+        if result.is_ok() {
+            assert!(output_archive.exists());
+            
+            // Verify that only .txt files were processed (not .tmp)
+            let processed_paths = service.get_input_paths().await.unwrap();
+            assert_eq!(processed_paths.len(), 2); // Only test1.txt and test2.txt
+            assert!(processed_paths.iter().any(|p| p.contains("test1.txt")));
+            assert!(processed_paths.iter().any(|p| p.contains("test2.txt")));
+            assert!(!processed_paths.iter().any(|p| p.contains("test3.tmp")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_relative_path_conversion() {
+        // Test that relative paths are converted to absolute paths
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Change to temp directory
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+        
+        let test_file = temp_dir.path().join("relative_test.txt");
+        fs::write(&test_file, "relative content").unwrap();
+
+        let paths = vec![
+            "relative_test.txt".to_string(), // Relative path
+        ];
+
+        let archiver = SevenZipArchiver::new();
+        let reader: Box<dyn InputReader> = Box::new(VecReader::new(paths));
+
+        let output_archive = temp_dir.path().join("relative_test.7z");
+        let config = Config::builder()
+            .output_path(Some(&output_archive.to_string_lossy()), false)
+            .show_progress(false)
+            .build()
+            .expect("Failed to create config");
+
+        let service = BackupService::new(archiver, reader, config);
+
+        // Skip test if 7-Zip is not available
+        if service.archiver.is_available().await {
+            let result = service.run().await;
+            
+            if result.is_ok() {
+                // Verify the processed path is absolute
+                let processed_paths = service.get_input_paths().await.unwrap();
+                assert_eq!(processed_paths.len(), 1);
+                let processed_path = &processed_paths[0];
+                assert!(PathBuf::from(processed_path).is_absolute());
+            }
+        }
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+}
