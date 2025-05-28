@@ -62,33 +62,44 @@ impl SevenZipVerifier {
     pub fn with_path(executable_path: String) -> Self {
         Self { executable_path }
     }
-}
 
-impl Default for SevenZipVerifier {
-    fn default() -> Self {
-        Self::new()
+    /// Alternative method for listing archive entries with better Unicode support
+    /// Uses Windows-specific encoding handling when available
+    ///
+    /// This method addresses the issue where 7-Zip's `7z l -slt` command prints
+    /// non-English characters (like Cyrillic) as gibberish, causing verification
+    /// to fail when comparing paths. The solution uses:
+    /// 1. UTF-8 output forcing with `-sccUTF-8` flag
+    /// 2. Fallback to legacy method if UTF-8 approach fails
+    async fn list_archive_entries_with_encoding(
+        &self,
+        archive_path: &str,
+    ) -> Result<Vec<ArchiveEntry>> {
+        // First try the standard UTF-8 approach
+        match self.list_archive_entries_utf8(archive_path).await {
+            Ok(entries) => Ok(entries),
+            Err(_) => {
+                // Fallback to original method if UTF-8 fails
+                self.list_archive_entries_legacy(archive_path).await
+            }
+        }
     }
-}
 
-#[async_trait]
-impl ArchiveVerifier for SevenZipVerifier {
-    async fn list_archive_entries(&self, archive_path: &str) -> Result<Vec<ArchiveEntry>> {
-        // Ensure the archive path is valid
+    /// Try to list archive entries using UTF-8 encoding
+    async fn list_archive_entries_utf8(&self, archive_path: &str) -> Result<Vec<ArchiveEntry>> {
         let archive_path = tokio::fs::canonicalize(archive_path)
             .await
             .context_io("Failed to canonicalize archive path")?
             .to_string_lossy()
             .to_string();
 
-        // Use 7z l (list) command to get archive contents
         let mut cmd = Command::new(&self.executable_path);
         cmd.args([
-            "l",    // List contents
-            "-slt", // Show technical information (full paths and attributes)
+            "l",
+            "-slt",
+            "-sccUTF-8", // Force UTF-8 output
             &archive_path,
         ]);
-        // .env("LANG", "en_US.UTF-8") // Force English output
-        // .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         let output = cmd
             .output()
@@ -97,17 +108,54 @@ impl ArchiveVerifier for SevenZipVerifier {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(ArchtreeError::external_tool(
                 "7z",
-                format!(
-                    "7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}",
-                    stderr, stdout, stderr
-                ),
+                format!("7z list command failed: {}", stderr),
             ));
         }
 
+        // Parse as UTF-8
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|_| ArchtreeError::external_tool("7z", "Invalid UTF-8 output"))?;
+
+        self.parse_seven_zip_output(&stdout, &archive_path)
+    }
+
+    /// Legacy method for listing archive entries (original implementation)
+    async fn list_archive_entries_legacy(&self, archive_path: &str) -> Result<Vec<ArchiveEntry>> {
+        let archive_path = tokio::fs::canonicalize(archive_path)
+            .await
+            .context_io("Failed to canonicalize archive path")?
+            .to_string_lossy()
+            .to_string();
+
+        let mut cmd = Command::new(&self.executable_path);
+        cmd.args(["l", "-slt", &archive_path]);
+
+        let output = cmd
+            .output()
+            .await
+            .context_io("Failed to execute 7z list command")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ArchtreeError::external_tool(
+                "7z",
+                format!("7z list command failed: {}", stderr),
+            ));
+        }
+
+        // Use lossy conversion for legacy compatibility
         let stdout = String::from_utf8_lossy(&output.stdout);
+        self.parse_seven_zip_output(&stdout, &archive_path)
+    }
+
+    /// Parse 7-Zip output and extract archive entries
+    fn parse_seven_zip_output(
+        &self,
+        stdout: &str,
+        archive_path: &str,
+    ) -> Result<Vec<ArchiveEntry>> {
         let mut entries = Vec::new();
 
         // Parse 7z -slt output which provides detailed information
@@ -121,7 +169,7 @@ impl ArchiveVerifier for SevenZipVerifier {
                 // Start of a new entry
                 let path = line.strip_prefix("Path = ").unwrap_or("").to_string();
 
-                // Skip the archive itself
+                // Skip the archive itself and empty paths
                 if path != archive_path && !path.is_empty() {
                     current_entry = Some(ArchiveEntry {
                         path,
@@ -159,6 +207,20 @@ impl ArchiveVerifier for SevenZipVerifier {
         }
 
         Ok(entries)
+    }
+}
+
+impl Default for SevenZipVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ArchiveVerifier for SevenZipVerifier {
+    async fn list_archive_entries(&self, archive_path: &str) -> Result<Vec<ArchiveEntry>> {
+        // Use the new encoding-aware method
+        self.list_archive_entries_with_encoding(archive_path).await
     }
 
     async fn is_available(&self) -> bool {
