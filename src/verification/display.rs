@@ -16,7 +16,7 @@ pub struct DetailedDisplayStrategy;
 impl MissingFileDisplayStrategy for DetailedDisplayStrategy {
     fn display_missing_files(&self, result: &VerificationResult) {
         for missing in &result.missing_files {
-            println!("    - {}", missing);
+            eprintln!("    - {}", missing);
         }
     }
 
@@ -32,7 +32,7 @@ impl MissingFileDisplayStrategy for ConsolidatedDisplayStrategy {
     fn display_missing_files(&self, result: &VerificationResult) {
         let consolidated_missing = result.get_consolidated_missing_files();
         for missing in &consolidated_missing {
-            println!("    - {}", missing);
+            eprintln!("    - {}", missing);
         }
     }
 

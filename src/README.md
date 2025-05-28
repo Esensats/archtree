@@ -9,7 +9,7 @@ The application entry point and command-line interface. Features:
 - **CLI Arguments**: Uses `clap` for parsing options like input files, output paths, 7-Zip executable paths, verification, and retry modes
 - **Application Modes**: Supports normal backup mode and verify-only mode for existing archives
 - **Service Orchestration**: Initializes and coordinates all components (archiver, validator, input reader, verifier)
-- **Configuration Management**: Builds configuration from CLI args, environment variables (`ARCHTREE_OUTPUT_PATH`, `SEVEN_ZIP_PATH`)
+- **Configuration Management**: Builds configuration from CLI args, environment variables (`SEVEN_ZIP_PATH`)
 - **Verification Integration**: Optionally runs verification and retry after backup completion
 
 ## Archive Management
@@ -37,7 +37,7 @@ Comprehensive archive verification and path processing system:
 
 ### `config.rs`
 Robust configuration management with builder pattern:
-- **Environment Variable Support**: Automatically reads `ARCHTREE_OUTPUT_PATH` and `SEVEN_ZIP_PATH`
+- **Environment Variable Support**: Automatically reads `SEVEN_ZIP_PATH`
 - **Builder Pattern**: Fluent API for constructing configuration objects
 - **Validation**: Ensures required fields (output path) are provided and non-empty
 - **Priority System**: CLI arguments override environment variables

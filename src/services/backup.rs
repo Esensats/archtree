@@ -1,4 +1,4 @@
-use crate::core::{Config, Result, ArchtreeError, ErrorContext};
+use crate::core::{ArchtreeError, Config, ErrorContext, Result};
 use crate::io::{Archiver, InputReader};
 use crate::processing::{PathProcessor, ProcessingStatus, WildcardMatcher};
 use std::path::PathBuf;
@@ -33,7 +33,10 @@ where
     /// Get processed paths as strings (for verification compatibility)
     pub async fn get_input_paths(&self) -> Result<Vec<String>> {
         if let Some(cached_paths) = self.processed_paths.get() {
-            return Ok(cached_paths.iter().map(|p| p.to_string_lossy().to_string()).collect());
+            return Ok(cached_paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect());
         }
 
         let processed_paths = self.process_input_paths().await?;
@@ -47,7 +50,10 @@ where
 
     /// Process input paths using the improved algorithm
     async fn process_input_paths(&self) -> Result<Vec<PathBuf>> {
-        let input_paths = self.reader.read_paths().await
+        let input_paths = self
+            .reader
+            .read_paths()
+            .await
             .context_io("Failed to read input paths")?;
 
         if input_paths.is_empty() {
@@ -55,17 +61,20 @@ where
         }
 
         // Extract exclusion patterns from input
-        let (include_paths, exclude_patterns) = PathProcessor::extract_exclusion_patterns(&input_paths);
+        let (include_paths, exclude_patterns) =
+            PathProcessor::extract_exclusion_patterns(&input_paths);
 
         if !exclude_patterns.is_empty() && self.config.show_progress {
-            println!("Found {} exclusion patterns:", exclude_patterns.len());
+            eprintln!("Found {} exclusion patterns:", exclude_patterns.len());
             for pattern in &exclude_patterns {
-                println!("  🚫 {}", pattern);
+                eprintln!("  🚫 {}", pattern);
             }
         }
 
         if include_paths.is_empty() {
-            return Err(ArchtreeError::config("No include paths found after filtering exclusions"));
+            return Err(ArchtreeError::config(
+                "No include paths found after filtering exclusions",
+            ));
         }
 
         // Create path processor and matcher
@@ -85,14 +94,14 @@ where
                 |path, status| match status {
                     ProcessingStatus::Added => {
                         added_count += 1;
-                        if self.config.show_progress {
-                            println!("✓ {}", path.display());
-                        }
+                        // if self.config.show_progress {
+                        //     eprintln!("✓ {}", path.display());
+                        // }
                     }
                     ProcessingStatus::Excluded => {
                         excluded_count += 1;
                         if self.config.show_progress {
-                            println!("🚫 Excluded: {}", path.display());
+                            eprintln!("🚫 Excluded: {}", path.display());
                         }
                     }
                     ProcessingStatus::Invalid(ref error) => {
@@ -109,15 +118,15 @@ where
 
         // Report final statistics
         if self.config.show_progress {
-            println!("\n📊 Processing Summary:");
-            println!("  ✓ Added: {} files", added_count);
+            eprintln!("\n📊 Processing Summary:");
+            eprintln!("  ✓ Added: {} files", added_count);
             if excluded_count > 0 {
-                println!("  🚫 Excluded: {} files", excluded_count);
+                eprintln!("  🚫 Excluded: {} files", excluded_count);
             }
             if invalid_count > 0 {
-                println!("  ⚠️  Invalid: {} paths", invalid_count);
+                eprintln!("  ⚠️  Invalid: {} paths", invalid_count);
             }
-            println!("  📁 Total for archive: {} files", processed_paths.len());
+            eprintln!("  📁 Total for archive: {} files", processed_paths.len());
         }
 
         Ok(processed_paths)
@@ -129,12 +138,12 @@ where
         if !self.archiver.is_available().await {
             return Err(ArchtreeError::external_tool(
                 self.archiver.name(),
-                format!("{} is not available on this system", self.archiver.name())
+                format!("{} is not available on this system", self.archiver.name()),
             ));
         }
 
         if self.config.show_progress {
-            println!("🚀 Starting backup process...");
+            eprintln!("🚀 Starting backup process...");
         }
 
         // Process paths using the new algorithm
@@ -148,7 +157,7 @@ where
         let _ = self.processed_paths.set(processed_paths.clone());
 
         if self.config.show_progress {
-            println!("\n📦 Creating archive: {}", self.config.output_path);
+            eprintln!("\n📦 Creating archive: {}", self.config.output_path);
         }
 
         // Convert paths to strings for archiver compatibility
@@ -164,7 +173,10 @@ where
             .context_io("Failed to create archive")?;
 
         if self.config.show_progress {
-            println!("✅ Archive created successfully: {}", self.config.output_path);
+            eprintln!(
+                "✅ Archive created successfully: {}",
+                self.config.output_path
+            );
         }
 
         Ok(())

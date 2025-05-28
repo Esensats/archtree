@@ -3,8 +3,8 @@ use crate::{
     io::Archiver,
     processing::validation::PathValidator,
     verification::{
-        verifier::{ArchiveVerifier, VerificationResult},
         display,
+        verifier::{ArchiveVerifier, VerificationResult},
     },
 };
 
@@ -34,7 +34,7 @@ pub enum VerificationEvent {
         final_total: usize,
     },
     /// Entire process completed successfully
-    Complete,
+    Complete { mode: VerificationMode },
 }
 
 /// Trait for handling verification progress callbacks
@@ -62,7 +62,7 @@ impl VerificationCallback for ConsoleCallback {
 
         match event {
             VerificationEvent::Starting => {
-                println!("🔍 Verifying archive contents...");
+                eprintln!("🔍 Verifying archive contents...");
             }
             VerificationEvent::ArchiveListingComplete { entries_found: _ } => {
                 // Could add debug info here if needed
@@ -72,28 +72,28 @@ impl VerificationCallback for ConsoleCallback {
                 found,
                 total_expected,
             } => {
-                println!("📊 Verification Results:");
+                eprintln!("📊 Verification Results:");
                 let success_rate = if total_expected > 0 {
                     found as f64 / total_expected as f64 * 100.0
                 } else {
                     100.0
                 };
-                println!(
+                eprintln!(
                     "  ✅ Successfully archived: {}/{} files ({:.1}%)",
                     found, total_expected, success_rate
                 );
                 if missing > 0 {
-                    println!("  ❌ Missing files: {}", missing);
+                    eprintln!("  ❌ Missing files: {}", missing);
                 }
             }
             VerificationEvent::DisplayingMissingFiles { count: _ } => {
                 // Missing files are displayed by the display strategy
             }
             VerificationEvent::RetryStarting { files_to_retry } => {
-                println!("🔄 Retrying missing files... ({} files)", files_to_retry);
+                eprintln!("🔄 Retrying missing files... ({} files)", files_to_retry);
             }
             VerificationEvent::RetryComplete { files_added } => {
-                println!(
+                eprintln!(
                     "✅ Retry completed. {} files added to archive.",
                     files_added
                 );
@@ -108,13 +108,21 @@ impl VerificationCallback for ConsoleCallback {
                 } else {
                     100.0
                 };
-                println!(
+                eprintln!(
                     "📊 Final Results: {}/{} files ({:.1}%)",
                     final_found, final_total, final_success_rate
                 );
             }
-            VerificationEvent::Complete => {
-                println!("🎉 All files successfully archived!");
+            VerificationEvent::Complete { mode } => {
+                eprintln!("🎉 All files successfully archived!");
+                match mode {
+                    VerificationMode::VerifyOnly => {
+                        eprintln!(
+                            "💡 Use --retry flag to automatically attempt adding missing files."
+                        )
+                    }
+                    VerificationMode::VerifyWithRetry => {}
+                }
             }
         }
     }
@@ -152,9 +160,7 @@ impl VerificationAndRetryService {
         callback.on_event(VerificationEvent::Starting);
 
         // Verify archive directly with the verifier
-        let result = verifier
-            .verify_archive(archive_path, input_paths)
-            .await?;
+        let result = verifier.verify_archive(archive_path, input_paths).await?;
 
         // Notify completion of comparison
         callback.on_event(VerificationEvent::ComparisonComplete {
@@ -186,11 +192,11 @@ impl VerificationAndRetryService {
                     .await;
                 }
                 VerificationMode::VerifyOnly => {
-                    println!("💡 Use --retry flag to automatically attempt adding missing files.");
+                    // No action needed
                 }
             }
         } else {
-            callback.on_event(VerificationEvent::Complete);
+            callback.on_event(VerificationEvent::Complete { mode });
         }
 
         Ok(result)
@@ -232,9 +238,7 @@ impl VerificationAndRetryService {
             });
 
             // Verify again after retry
-            let retry_result = verifier
-                .verify_archive(archive_path, input_paths)
-                .await?;
+            let retry_result = verifier.verify_archive(archive_path, input_paths).await?;
 
             callback.on_event(VerificationEvent::RetryVerificationComplete {
                 final_missing: retry_result.missing_files.len(),
@@ -243,7 +247,9 @@ impl VerificationAndRetryService {
             });
 
             if retry_result.missing_files.is_empty() {
-                callback.on_event(VerificationEvent::Complete);
+                callback.on_event(VerificationEvent::Complete {
+                    mode: VerificationMode::VerifyWithRetry,
+                });
             }
 
             Ok(retry_result)

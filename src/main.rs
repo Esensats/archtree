@@ -30,7 +30,7 @@ enum Commands {
         #[arg(short = 'f', long = "file")]
         input_file: Option<String>,
 
-        /// Output archive path (overrides environment variables)
+        /// Output archive path
         #[arg(short = 'o', long = "output", required = true)]
         output: String,
 
@@ -131,7 +131,7 @@ async fn run_backup_command(
     // Handle verification if requested
     if verify {
         if !quiet {
-            println!("\n🔍 Verifying archive...");
+            eprintln!("\n🔍 Verifying archive...");
         }
 
         // Get the input paths that were processed
@@ -241,7 +241,7 @@ async fn run_verify_command(
     };
 
     if !quiet {
-        println!("🔍 Verifying archive: {}", archive);
+        eprintln!("🔍 Verifying archive: {}", archive);
     }
 
     // Run verification
@@ -299,7 +299,7 @@ mod tests {
         // The command should handle 7z not being available gracefully
         if result.is_err() {
             // This is expected in test environment without 7z
-            println!("Expected error in test environment: {:?}", result);
+            eprintln!("Expected error in test environment: {:?}", result);
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::core::{Result, ErrorContext, ArchtreeError};
+use crate::core::{ArchtreeError, ErrorContext, Result};
 use async_trait::async_trait;
 use tokio::process::Command;
 
@@ -63,12 +63,15 @@ impl Archiver for SevenZipArchiver {
             "-t7z",                                    // 7z format
             output_path,                               // Output archive path
             &format!("@{}", temp_list_path.display()), // Input file list
-        ])
-        .env("LANG", "en_US.UTF-8") // Force English output
-        .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
+        ]);
+        // .env("LANG", "en_US.UTF-8") // Force English output
+        // .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         // Execute the command
-        let output = cmd.output().await.context_external("7z", "Failed to execute 7z command")?;
+        let output = cmd
+            .output()
+            .await
+            .context_external("7z", "Failed to execute 7z command")?;
 
         // Clean up the temporary file
         let _ = tokio::fs::remove_file(&temp_list_path).await;
@@ -77,8 +80,8 @@ impl Archiver for SevenZipArchiver {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(crate::core::ArchtreeError::external_tool(
-                "7z", 
-                format!("7z command failed:\nStderr: {}\nStdout: {}", stderr, stdout)
+                "7z",
+                format!("7z command failed:\nStderr: {}\nStdout: {}", stderr, stdout),
             ));
         }
 
@@ -86,6 +89,13 @@ impl Archiver for SevenZipArchiver {
     }
 
     async fn add_to_archive(&self, paths: &[String], archive_path: &str) -> Result<()> {
+        // Ensure the archive path is valid
+        let archive_path = tokio::fs::canonicalize(archive_path)
+            .await
+            .context_io("Failed to canonicalize archive path")?
+            .to_string_lossy()
+            .to_string();
+
         // Create a temporary file list for 7-Zip with explicit path
         let temp_dir = std::env::temp_dir();
         let temp_list_path = temp_dir.join(format!("7zip_add_list_{}.txt", std::process::id()));
@@ -102,11 +112,11 @@ impl Archiver for SevenZipArchiver {
             "u",                                       // Update archive (add if not exists)
             "-spf",                                    // Use full paths
             "-t7z",                                    // 7z format
-            archive_path,                              // Archive path
+            &archive_path,                             // Archive path
             &format!("@{}", temp_list_path.display()), // Input file list
-        ])
-        .env("LANG", "en_US.UTF-8") // Force English output
-        .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
+        ]);
+        // .env("LANG", "en_US.UTF-8") // Force English output
+        // .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         // Execute the command
         let output = cmd
@@ -122,7 +132,10 @@ impl Archiver for SevenZipArchiver {
             let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(ArchtreeError::external_tool(
                 "7z",
-                format!("7z update command failed:\nStderr: {}\nStdout: {}", stderr, stdout)
+                format!(
+                    "7z update command failed:\nStderr: {}\nStdout: {}",
+                    stderr, stdout
+                ),
             ));
         }
 
@@ -132,8 +145,6 @@ impl Archiver for SevenZipArchiver {
     async fn is_available(&self) -> bool {
         Command::new(&self.executable_path)
             .arg("--help")
-            .env("LANG", "en_US.UTF-8") // Force English output
-            .env("LC_ALL", "en_US.UTF-8") // Override locale settings
             .output()
             .await
             .map(|output| output.status.success())

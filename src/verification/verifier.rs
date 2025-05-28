@@ -1,4 +1,4 @@
-use crate::core::{Result, ErrorContext, ArchtreeError};
+use crate::core::{ArchtreeError, ErrorContext, Result};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -73,15 +73,22 @@ impl Default for SevenZipVerifier {
 #[async_trait]
 impl ArchiveVerifier for SevenZipVerifier {
     async fn list_archive_entries(&self, archive_path: &str) -> Result<Vec<ArchiveEntry>> {
+        // Ensure the archive path is valid
+        let archive_path = tokio::fs::canonicalize(archive_path)
+            .await
+            .context_io("Failed to canonicalize archive path")?
+            .to_string_lossy()
+            .to_string();
+
         // Use 7z l (list) command to get archive contents
         let mut cmd = Command::new(&self.executable_path);
         cmd.args([
             "l",    // List contents
             "-slt", // Show technical information (full paths and attributes)
-            archive_path,
-        ])
-        .env("LANG", "en_US.UTF-8") // Force English output
-        .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
+            &archive_path,
+        ]);
+        // .env("LANG", "en_US.UTF-8") // Force English output
+        // .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         let output = cmd
             .output()
@@ -93,7 +100,10 @@ impl ArchiveVerifier for SevenZipVerifier {
             let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(ArchtreeError::external_tool(
                 "7z",
-                format!("7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}", stderr, stdout, stderr)
+                format!(
+                    "7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}",
+                    stderr, stdout, stderr
+                ),
             ));
         }
 
@@ -154,8 +164,6 @@ impl ArchiveVerifier for SevenZipVerifier {
     async fn is_available(&self) -> bool {
         Command::new(&self.executable_path)
             .arg("--help")
-            .env("LANG", "en_US.UTF-8") // Force English output
-            .env("LC_ALL", "en_US.UTF-8") // Override locale settings
             .output()
             .await
             .map(|output| output.status.success())
@@ -173,7 +181,10 @@ impl ArchiveVerifier for SevenZipVerifier {
     ) -> Result<VerificationResult> {
         // Check if verifier is available
         if !self.is_available().await {
-            return Err(ArchtreeError::external_tool(self.name(), "is not available"));
+            return Err(ArchtreeError::external_tool(
+                self.name(),
+                "is not available",
+            ));
         }
 
         // Expand input paths to get all individual files
@@ -213,19 +224,19 @@ impl ArchiveVerifier for SevenZipVerifier {
 fn compare_file_lists(expected: &[String], archived: &[String]) -> (Vec<String>, Vec<String>) {
     let archived_set: HashSet<&String> = archived.iter().collect();
     let _expected_set: HashSet<&String> = expected.iter().collect();
-    
+
     let missing_files: Vec<String> = expected
         .iter()
         .filter(|&file| !archived_set.contains(file))
         .cloned()
         .collect();
-    
+
     let found_files: Vec<String> = expected
         .iter()
         .filter(|&file| archived_set.contains(file))
         .cloned()
         .collect();
-    
+
     (missing_files, found_files)
 }
 
@@ -460,124 +471,6 @@ pub fn consolidate_missing_files(
     consolidated
 }
 
-/// Service for verifying archive contents against expected files
-pub struct VerificationService<V>
-where
-    V: ArchiveVerifier,
-{
-    verifier: V,
-}
-
-impl<V> VerificationService<V>
-where
-    V: ArchiveVerifier,
-{
-    pub fn new(verifier: V) -> Self {
-        Self { verifier }
-    }
-
-    /// Verify that all expected files are present in the archive
-    pub async fn verify_archive(
-        &self,
-        archive_path: &str,
-        expected_paths: &[String],
-    ) -> Result<VerificationResult> {
-        // Check if verifier is available
-        if !self.verifier.is_available().await {
-            return Err(ArchtreeError::external_tool(self.verifier.name(), "is not available"));
-        }
-
-        // Expand input paths to get all individual files
-        let expanded_expected_files = expand_input_paths(expected_paths).await?;
-
-        // Get archive entries
-        let archive_entries = self.verifier.list_archive_entries(archive_path).await?;
-
-        // Extract just the files from archive entries
-        let archived_files: Vec<&ArchiveEntry> = archive_entries
-            .iter()
-            .filter(|entry| !entry.is_directory)
-            .collect();
-
-        // Create sets for comparison - we'll compare both full paths and filenames
-        let archived_file_paths: HashSet<String> = archived_files
-            .iter()
-            .map(|entry| self.normalize_path(&entry.path))
-            .collect();
-
-        let archived_filenames: HashSet<String> = archived_files
-            .iter()
-            .map(|entry| {
-                // Extract just the filename from the archived path
-                std::path::Path::new(&entry.path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase()
-            })
-            .collect();
-
-        // Find missing files by checking both full path and filename matches
-        let missing_files: Vec<String> = expanded_expected_files
-            .iter()
-            .filter(|path| {
-                let normalized_full_path = self.normalize_path(path);
-                let filename = std::path::Path::new(path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-
-                // File is considered archived if either the full path or filename matches
-                !archived_file_paths.contains(&normalized_full_path)
-                    && !archived_filenames.contains(&filename)
-            })
-            .cloned()
-            .collect();
-
-        // Find successfully archived files
-        let successfully_archived: Vec<String> = expanded_expected_files
-            .iter()
-            .filter(|path| {
-                let normalized_full_path = self.normalize_path(path);
-                let filename = std::path::Path::new(path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-
-                // File is considered archived if either the full path or filename matches
-                archived_file_paths.contains(&normalized_full_path)
-                    || archived_filenames.contains(&filename)
-            })
-            .cloned()
-            .collect();
-
-        Ok(VerificationResult {
-            missing_files,
-            archived_files: successfully_archived,
-            all_expected_files: expanded_expected_files.clone(),
-            total_expected: expanded_expected_files.len(),
-            total_archived: archived_files.len(),
-        })
-    }
-
-    /// Get the expanded list of files from input paths (useful for debugging)
-    pub async fn expand_paths(&self, input_paths: &[String]) -> Result<Vec<String>> {
-        expand_input_paths(input_paths).await
-    }
-
-    /// Normalize a file path for comparison (handle Windows/Unix differences, case sensitivity)
-    fn normalize_path(&self, path: &str) -> String {
-        // Convert to lowercase for case-insensitive comparison on Windows
-        let normalized = path.to_lowercase();
-
-        // Normalize path separators to forward slashes
-        // Replace backslashes with forward slashes and remove leading './' if present
-        normalized.replace('\\', "/").replace("./", "")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,28 +517,5 @@ mod tests {
 
         assert!(complete_result.is_complete());
         assert_eq!(complete_result.success_rate(), 100.0);
-    }
-
-    #[tokio::test]
-    async fn test_path_normalization() {
-        let verifier = SevenZipVerifier::new();
-        let service = VerificationService::new(verifier);
-
-        assert_eq!(
-            service.normalize_path("C:\\Users\\Test\\file.txt"),
-            "c:/users/test/file.txt"
-        );
-        assert_eq!(
-            service.normalize_path("/home/user/file.txt"),
-            "/home/user/file.txt"
-        );
-        assert_eq!(
-            service.normalize_path("relative\\path\\file.txt"),
-            "relative/path/file.txt"
-        );
-        assert_eq!(
-            service.normalize_path(".\\relative\\path\\file.txt"),
-            "relative/path/file.txt"
-        );
     }
 }

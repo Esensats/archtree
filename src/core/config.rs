@@ -36,11 +36,6 @@ impl ConfigBuilder {
                 return self;
             }
         }
-        if try_env {
-            if let Ok(env_path) = env::var("ARCHTREE_OUTPUT_PATH") {
-                self.output_path = Some(env_path.trim().to_string());
-            }
-        }
         self
     }
 
@@ -112,12 +107,11 @@ mod tests {
     fn test_config_from_env() {
         // Set test environment variable
         unsafe {
-            env::set_var("ARCHTREE_OUTPUT_PATH", "test-archive.7z");
             env::set_var("SEVEN_ZIP_PATH", "test-7z.exe");
         }
 
         let config = Config::builder()
-            .output_path(None, true)
+            .output_path(Some("test-archive.7z"), true)
             .seven_zip_path(None, true)
             .build()
             .expect("Failed to create config from environment");
@@ -127,7 +121,6 @@ mod tests {
 
         // Clean up
         unsafe {
-            env::remove_var("ARCHTREE_OUTPUT_PATH");
             env::remove_var("SEVEN_ZIP_PATH");
         }
     }
