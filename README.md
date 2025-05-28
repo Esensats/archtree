@@ -102,19 +102,6 @@ Get-Content paths.txt | .\target\release\archtree.exe --verify-only "C:\Backups\
 .\target\release\archtree.exe --help
 ```
 
-### PowerShell Compatibility
-
-The Rust version is fully compatible with the PowerShell version:
-
-```powershell
-# Environment variable support (same as PowerShell version)
-$env:TEST_ARCHIVE_PATH = "C:\Backups\backup-$(Get-Date -Format 'yyyy-MM-dd').7z"
-Get-Content paths.txt | .\target\release\archtree.exe
-
-# Drop-in replacement for PowerShell script
-Get-Content paths.txt | .\target\release\archtree.exe
-```
-
 ## Archive Verification 🔍
 
 The Rust version includes comprehensive archive verification capabilities to ensure your backups are complete and reliable.
@@ -218,7 +205,7 @@ This handles common scenarios where:
 
 ### Environment Variables
 
-- **`TEST_ARCHIVE_PATH`**: Override output path (PowerShell compatibility)
+- **`ARCHTREE_OUTPUT_PATH`**: Override output path
 - **`SEVEN_ZIP_PATH`**: Custom 7-Zip executable path
 - **`USERPROFILE`**: Used for default output location
 
@@ -250,42 +237,6 @@ cargo test
 # Run with verbose output
 cargo test -- --nocapture
 ```
-
-### Test Coverage
-
-The test suite includes:
-
-- ✅ **Unit Tests**: All modules tested in isolation
-- ✅ **Integration Tests**: End-to-end workflow testing
-- ✅ **Mock Testing**: No filesystem damage during tests
-- ✅ **Error Handling**: Invalid paths, missing dependencies
-- ✅ **Configuration**: Environment variables and CLI args
-- ✅ **Verification**: Archive content validation and retry logic
-
-### Safe Testing Philosophy
-
-Tests use temporary directories and mock data to avoid:
-- 🚫 Deleting user files
-- 🚫 Modifying system directories  
-- 🚫 Creating large files on disk
-- 🚫 Leaving artifacts behind
-
-## Performance Comparison 📊
-
-| Metric           | PowerShell | Python | **Rust**    |
-| ---------------- | ---------- | ------ | ----------- |
-| **Startup Time** | ~500ms     | ~200ms | **~50ms**   |
-| **Memory Usage** | ~50MB      | ~30MB  | **~5MB**    |
-| **CPU Usage**    | Medium     | Low    | **Minimal** |
-| **Throughput**   | Good       | Better | **Best**    |
-
-### When to Use Rust Version
-
-- ✅ **Large datasets** (100+ GB)
-- ✅ **Frequent backups** (scheduled/automated)
-- ✅ **Resource-constrained environments**
-- ✅ **CI/CD pipelines** (fast startup)
-- ✅ **Long-running processes**
 
 ## Development 👨‍💻
 

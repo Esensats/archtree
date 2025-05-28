@@ -11,7 +11,6 @@ use anyhow::Result;
 use archiver::{Archiver, SevenZipArchiver};
 use clap::Parser;
 use config::Config;
-use exclusion::{ExclusionService, WildcardMatcher};
 use input::{FileReader, StdinReader};
 use service::BackupService;
 use validator::{FileSystemValidator, PathValidator};
@@ -57,21 +56,11 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Load base configuration from environment
-    let mut config = Config::from_env()?;
-
-    // Override with command line arguments
-    if let Some(ref output) = args.output {
-        config = config.with_output_path(output.clone());
-    }
-
-    if let Some(ref seven_zip_path) = args.seven_zip_path {
-        config = config.with_seven_zip_path(seven_zip_path.clone());
-    }
-
-    if args.quiet {
-        config = config.with_progress(false);
-    }
+    let config = Config::builder()
+        .output_path(args.output.as_deref().or(args.verify_only.as_deref()), true)
+        .seven_zip_path(args.seven_zip_path.as_deref(), true)
+        .show_progress(!args.quiet)
+        .build()?;
 
     // Handle verify-only mode
     if let Some(ref archive_path) = args.verify_only {
@@ -89,17 +78,17 @@ async fn main() -> Result<()> {
 
     // Create reader based on input source
     let reader: Box<dyn input::InputReader> = match &args.input_file {
-        Some(file_path) => Box::new(FileReader::new(file_path.clone())),
+        Some(file_path) => Box::new(FileReader::new(file_path)),
         None => Box::new(StdinReader::new()),
     };
 
     // Create and run backup service
     let service = BackupService::new(archiver, validator, reader, config.clone());
-    let input_paths = service.get_input_paths().await?;
     service.run().await?;
 
     // Verify archive if requested
     if args.verify {
+        let input_paths = service.get_input_paths().await?;
         verify_archive(&config.output_path, &input_paths, &args, &config).await?;
     }
 
@@ -107,22 +96,18 @@ async fn main() -> Result<()> {
 }
 
 async fn verify_only_mode(archive_path: &str, args: &Args, config: &Config) -> Result<()> {
-    // Create reader to get input paths for verification
+    // Create validator and reader (same as regular backup flow)
+    let validator = FileSystemValidator::new();
     let reader: Box<dyn input::InputReader> = match &args.input_file {
-        Some(file_path) => Box::new(FileReader::new(file_path.clone())),
+        Some(file_path) => Box::new(FileReader::new(file_path)),
         None => Box::new(StdinReader::new()),
     };
 
-    let raw_input_paths = reader.read_paths().await?;
-
-    // Apply exclusion patterns to get the actual paths that should be in the archive
-    let exclusion_service = ExclusionService::new(WildcardMatcher::new());
-    let (input_paths, excluded_count) =
-        exclusion_service.apply_exclusions(&raw_input_paths).await?;
-
-    if excluded_count > 0 && config.show_progress {
-        println!("📝 Excluded {} patterns from verification.", excluded_count);
-    }
+    // Create a minimal backup service just to get the processed input paths
+    // This ensures the same exclusion + validation logic as the regular backup flow
+    let archiver = SevenZipArchiver::new(); // Not used, but required for the service
+    let service = BackupService::new(archiver, validator, reader, config.clone());
+    let input_paths = service.get_input_paths().await?;
 
     verify_archive(archive_path, &input_paths, args, config).await
 }

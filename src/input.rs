@@ -29,7 +29,7 @@ impl InputReader for StdinReader {
     async fn read_paths(&self) -> Result<Vec<String>> {
         let stdin = io::stdin();
         let mut paths = Vec::new();
-        
+
         for line in stdin.lock().lines() {
             let line = line.context("Failed to read line from stdin")?;
             let trimmed = line.trim();
@@ -37,7 +37,7 @@ impl InputReader for StdinReader {
                 paths.push(trimmed.to_string());
             }
         }
-        
+
         Ok(paths)
     }
 }
@@ -48,8 +48,10 @@ pub struct FileReader {
 }
 
 impl FileReader {
-    pub fn new(file_path: String) -> Self {
-        Self { file_path }
+    pub fn new(file_path: &str) -> Self {
+        Self {
+            file_path: file_path.to_string(),
+        }
     }
 }
 
@@ -59,13 +61,13 @@ impl InputReader for FileReader {
         let content = tokio::fs::read_to_string(&self.file_path)
             .await
             .context(format!("Failed to read file: {}", self.file_path))?;
-        
+
         let paths = content
             .lines()
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
             .collect();
-        
+
         Ok(paths)
     }
 }
@@ -91,9 +93,9 @@ impl InputReader for VecReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
-    
+    use tempfile::NamedTempFile;
+
     #[tokio::test]
     async fn test_file_reader() {
         let mut temp_file = NamedTempFile::new().unwrap();
@@ -101,26 +103,26 @@ mod tests {
         writeln!(temp_file, "C:\\path\\two").unwrap();
         writeln!(temp_file, "").unwrap(); // Empty line should be filtered
         writeln!(temp_file, "  C:\\path\\three  ").unwrap(); // Should be trimmed
-        
-        let reader = FileReader::new(temp_file.path().to_string_lossy().to_string());
+
+        let reader = FileReader::new(&temp_file.path().to_string_lossy());
         let paths = reader.read_paths().await.unwrap();
-        
+
         assert_eq!(paths.len(), 3);
         assert_eq!(paths[0], "C:\\path\\one");
         assert_eq!(paths[1], "C:\\path\\two");
         assert_eq!(paths[2], "C:\\path\\three");
     }
-    
+
     #[tokio::test]
     async fn test_vec_reader() {
         let input_paths = vec![
             "C:\\Users\\test\\Documents".to_string(),
             "D:\\Projects".to_string(),
         ];
-        
+
         let reader = VecReader::new(input_paths.clone());
         let paths = reader.read_paths().await.unwrap();
-        
+
         assert_eq!(paths, input_paths);
     }
 }

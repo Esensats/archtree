@@ -71,7 +71,9 @@ impl ArchiveVerifier for SevenZipVerifier {
             "l",    // List contents
             "-slt", // Show technical information (full paths and attributes)
             archive_path,
-        ]);
+        ])
+        .env("LANG", "en_US.UTF-8") // Force English output
+        .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         let output = cmd
             .output()
@@ -80,7 +82,13 @@ impl ArchiveVerifier for SevenZipVerifier {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("7z list command failed: {}", stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            anyhow::bail!(
+                "7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}",
+                stderr,
+                stdout,
+                stderr
+            );
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -140,6 +148,8 @@ impl ArchiveVerifier for SevenZipVerifier {
     async fn is_available(&self) -> bool {
         Command::new(&self.executable_path)
             .arg("--help")
+            .env("LANG", "en_US.UTF-8") // Force English output
+            .env("LC_ALL", "en_US.UTF-8") // Override locale settings
             .output()
             .await
             .map(|output| output.status.success())
