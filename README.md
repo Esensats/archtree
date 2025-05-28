@@ -98,17 +98,16 @@ You can exclude files by adding exclusion patterns to your file list. Exclusion 
 
 **Example file list:**
 ```
-# Files to backup
 C:\Projects\source\
 C:\Documents\important.pdf
 test_files\data.json
-
-# Skip these
 !*.tmp
 !*.log
 !**/cache/**
 !node_modules/**
 ```
+
+The first lines specify the files to include, and the lines starting with `!` specify exclusions.
 
 **How it works:**
 - Exclusions are checked before scanning directories (faster)
