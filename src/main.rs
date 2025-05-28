@@ -15,7 +15,7 @@ use verification::{ConsoleCallback, VerificationAndRetryService, VerificationMod
 #[command(
     name = "archtree",
     about = "A backup tool that creates and verifies compressed archives using 7-Zip",
-    version = "2.0.0"
+    version = "0.2.1"
 )]
 struct Args {
     #[command(subcommand)]

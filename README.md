@@ -1,427 +1,272 @@
-# archtree 🦀
+# Archtree 🌿
 
-A modern, efficient backup tool written in Rust that creates and verifies compressed archives using 7-Zip.
+A backup tool that creates and verifies 7-Zip archives from file lists.
 
-Features intelligent path processing, exclusion patterns, comprehensive verification, and automatic retry capabilities for reliable backups.
+Takes a list of files and folders, creates compressed archives, and can verify that everything made it in correctly.
 
-> Why "archtree"? Because it builds an *arch*ive while preserving the hier*arch*y of your filesystem *tree*! 🌳
+> The name comes from building an **arch**ive while preserving your filesystem **tree** structure.
 
-## Features ✨
+## What it does
 
-- **🎯 Two-Mode Operation**: Backup creation and standalone archive verification
-- **🏗️ Clean Architecture**: Trait-based design with dependency injection for testability
-- **⚡ Optimized Performance**: Efficient path processing with early exclusion filtering
-- **🚫 Smart Exclusions**: Wildcard patterns (`*.tmp`, `cache/*`) with support for inline patterns  
-- **✅ Advanced Verification**: Compare archive contents against expected files with intelligent matching
-- **🔄 Automatic Retry**: Add missing files to existing archives with validation
-- **📊 Rich Progress Reporting**: Real-time feedback with success rates and consolidated file displays
-- **🔒 Memory Safe**: Rust's ownership model prevents common backup tool vulnerabilities
-- **📁 Path Flexibility**: Handle both absolute and relative paths with automatic normalization
-- **🌐 Cross-Platform**: Windows and Unix path handling with proper separator normalization
+- **Create backups** from file lists (text files or stdin)
+- **Verify archives** to make sure nothing was missed
+- **Add missing files** to existing archives automatically
+- **Filter files** using wildcard patterns (`*.tmp`, `cache/*`, etc.)
+- **Handle large datasets** efficiently with smart path processing
+- **Work with any paths** - absolute, relative, Windows, or Unix style
 
-## Quick Start 🚀
+## Getting started
 
-### Prerequisites
+### What you need
 
-- **Rust 1.70+** (install from [rustup.rs](https://rustup.rs/))
-- **7-Zip** (install via `winget install 7zip.7zip`)
+- **7-Zip** (install with `winget install 7zip.7zip`)
+- **Rust** to build from source (get it at [rustup.rs](https://rustup.rs/))
 
-### Installation
+### Install it
 
 ```powershell
-cd rust
-cargo build --release
+cargo install --path . --locked
 ```
 
-### Basic Usage
+### Use it
 
-**Create a backup:**
+**Make a backup:**
 ```powershell
-# From stdin
-Get-Content paths.txt | .\target\release\archtree.exe backup -o backup.7z
+# From a file list
+archtree backup -f my_files.txt -o backup.7z
 
-# From file  
-.\target\release\archtree.exe backup -f paths.txt -o backup.7z
+# From stdin (pipe in file paths)
+Get-Content file_list.txt | archtree backup -o backup.7z
 
-# With verification and retry
-.\target\release\archtree.exe backup -f paths.txt -o backup.7z --verify --retry
+# Create and verify in one go
+archtree backup -f my_files.txt -o backup.7z --verify --retry
 ```
 
-**Verify existing archive:**
+**Check an existing backup:**
 ```powershell
-# Verify only
-.\target\release\archtree.exe verify -a backup.7z -f original_paths.txt
+# Just verify what's in there
+archtree verify -a backup.7z -f original_list.txt
 
-# Verify and add missing files
-.\target\release\archtree.exe verify -a backup.7z -f paths.txt --retry
+# Verify and add anything that's missing
+archtree verify -a backup.7z -f file_list.txt --retry
 ```
 
-## Command Line Interface 🔧
+## Commands
 
-### Commands
-
-#### `backup` - Create Archive
+### `backup` - Create archives
 ```
 archtree backup [OPTIONS] --output <OUTPUT>
 
 Options:
-  -f, --file <FILE>           Input file with paths (uses stdin if not provided)
-  -o, --output <OUTPUT>       Output archive path (required)
-  --7zip-path <PATH>          Custom 7-Zip executable path
-  -q, --quiet                 Disable progress output
-  -v, --verify                Verify archive after creation
-  -r, --retry                 Retry missing files (requires --verify)
+  -f, --file <FILE>           Read paths from this file (otherwise uses stdin)
+  -o, --output <OUTPUT>       Where to save the archive
+  --7zip-path <PATH>          Use 7-Zip from this location
+  -q, --quiet                 Don't show progress
+  -v, --verify                Check the archive after creating it
+  -r, --retry                 Add missing files (only with --verify)
 ```
 
-#### `verify` - Verify Archive  
+### `verify` - Check existing archives
 ```
 archtree verify [OPTIONS] --archive <ARCHIVE>
 
 Options:
-  -a, --archive <ARCHIVE>     Archive file to verify (required)
-  -f, --file <FILE>           Input file with expected paths (uses stdin if not provided)
-  --7zip-path <PATH>          Custom 7-Zip executable path  
-  -q, --quiet                 Disable progress output
-  -r, --retry                 Add missing files to archive
+  -a, --archive <ARCHIVE>     Archive file to check
+  -f, --file <FILE>           Expected file list (otherwise uses stdin)
+  --7zip-path <PATH>          Use 7-Zip from this location
+  -q, --quiet                 Don't show progress
+  -r, --retry                 Add any missing files
 ```
 
-### Global Options
-- **Environment Variables**: `SEVEN_ZIP_PATH`
-- **Help**: `archtree --help` or `archtree <command> --help`
+**Environment variables:**
+- `SEVEN_ZIP_PATH` - Default 7-Zip location
 
-## Exclusion Patterns 🚫
+**Help:** `archtree --help` or `archtree <command> --help`
 
-Archtree supports inline exclusion patterns within your input file or stdin. Exclusion patterns start with `!` and support wildcards:
+## Filtering files
 
-### Pattern Syntax
-- `!*.tmp` - Exclude all `.tmp` files
-- `!cache/*` - Exclude everything in `cache` directories
-- `!**/node_modules/**` - Exclude `node_modules` directories recursively
-- `!temp_*` - Exclude files starting with `temp_`
+You can exclude files by adding exclusion patterns to your file list. Exclusion lines start with `!` and support wildcards:
 
-### Example Input File
+**Pattern examples:**
+- `!*.tmp` - Skip all .tmp files
+- `!cache/*` - Skip everything in cache folders
+- `!**/node_modules/**` - Skip node_modules anywhere
+- `!temp_*` - Skip files starting with "temp_"
+
+**Example file list:**
 ```
-# Regular paths to include
+# Files to backup
 C:\Projects\source\
 C:\Documents\important.pdf
 test_files\data.json
 
-# Exclusion patterns
+# Skip these
 !*.tmp
 !*.log
 !**/cache/**
 !node_modules/**
 ```
 
-### How Exclusions Work
-1. **Early Filtering**: Exclusions are applied before directory expansion for efficiency
-2. **Wildcard Matching**: Uses regex-based matching for flexible patterns  
-3. **Cross-Platform**: Handles both Windows (`\`) and Unix (`/`) path separators
-4. **Case Insensitive**: Pattern matching works regardless of case on Windows
+**How it works:**
+- Exclusions are checked before scanning directories (faster)
+- Works with Windows (`\`) and Unix (`/`) paths
+- Case-insensitive on Windows
 
-## Configuration ⚙️
+## Configuration
 
-## Configuration ⚙️
+**Environment variables:**
+- `SEVEN_ZIP_PATH` - Custom 7-Zip location
 
-### Environment Variables
+**Two ways to use it:**
+1. **Create and verify** - Use the `backup` command with `--verify` and `--retry`
+2. **Just verify** - Use the `verify` command on existing archives
 
-- **`SEVEN_ZIP_PATH`**: Custom 7-Zip executable path
+All commands work with files or stdin, and you can specify a custom 7-Zip path or run in quiet mode.
 
-### Command Line Integration
+## Testing
 
-The CLI supports two main workflows:
-
-1. **Create and Verify**: `backup` command with optional `--verify` and `--retry`
-2. **Standalone Verification**: `verify` command for existing archives
-
-All commands support custom 7-Zip paths, quiet mode, and flexible input sources (files or stdin).
-
-## Testing 🧪
-
-### Running Tests
-
+**Run tests:**
 ```powershell
-# Run all tests
+# All tests
 cargo test
 
-# Run tests with detailed output
+# With output
 cargo test -- --nocapture
 
-# Run only unit tests (exclude integration tests)
-cargo test --lib
-
-# Run specific test module
+# Specific module
 cargo test processing::exclusions
-
-# Run with multiple threads for faster execution
-cargo test --release
 ```
 
-### Test Coverage
-
-The project maintains comprehensive test coverage across:
-
-- **Unit Tests**: Individual component testing for each module
-- **Integration Tests**: End-to-end workflow testing  
-- **Mock Tests**: External dependency simulation (7-Zip not required)
-- **Error Handling**: Comprehensive error condition coverage
-
-### Test Environment Setup
-
+**Test setup:**
 ```powershell
-# Create test files for local testing
+# Create test files
 mkdir test_files
 echo "test content" > test_files\sample.txt
 
-# Run specific integration test
+# Run integration tests
 cargo test test_backup_command_integration
 ```
 
-## Architecture Overview 🏗️
+The tests cover individual components, full workflows, and error scenarios. Most tests use mocks so you don't need 7-Zip installed to run them.
 
-Archtree follows a clean, modular architecture with trait-based dependency injection:
+## How it works
+
+The tool is built with a modular design:
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   CLI Layer     │───▶│  Services Layer  │───▶│ Verification    │
-│   (main.rs)     │    │  (BackupService) │    │ (VerifyService) │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                        │                       │
-         ▼                        ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│ Core Traits     │    │ Processing Layer │    │ I/O Layer       │
-│ • Archiver      │    │ • PathProcessor  │    │ • InputReader   │
-│ • Verifier      │    │ • Exclusions     │    │ • Archiver      │
-│ • Validator     │    │ • Validation     │    │ • FileSystem    │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+CLI Commands → Services → Processing → File I/O
+    ↓             ↓          ↓           ↓
+  backup       BackupSvc   PathProc   Archiver
+  verify       VerifySvc   Exclusions   Reader
 ```
 
-### Key Components
+**Main parts:**
+- **CLI** - Command parsing and user interface
+- **Services** - Backup and verification workflows
+- **Processing** - Path handling, filtering, validation
+- **I/O** - File reading and archive operations
 
-- **Core Traits**: Define interfaces for testability and extensibility
-- **Service Layer**: Orchestrates the backup and verification workflows  
-- **Processing Layer**: Handles path expansion, exclusions, and validation
-- **I/O Layer**: Manages file reading, archive creation, and external tool integration
-- **Verification Layer**: Advanced comparison and retry logic with rich feedback
+**Key files:**
+- `src/main.rs` - Command line interface
+- `src/services/backup.rs` - Main backup logic
+- `src/verification/` - Archive verification
+- `src/processing/` - Path processing and exclusions
+- `src/io/` - File I/O and 7-Zip integration
 
-## Development Guide 👨‍💻
+## Development
 
-### Project Structure
+The code is organized like this:
 
 ```
 src/
-├── main.rs                    # CLI entry point and subcommand routing
-├── core/
-│   ├── mod.rs                # Core types and result handling
-│   ├── config.rs             # Configuration management with environment variables
-│   └── error.rs              # Error types and context management
-├── io/
-│   ├── mod.rs                # I/O module exports
-│   ├── input.rs              # InputReader trait and implementations (stdin, file)
-│   └── archiver.rs           # Archiver trait and 7-Zip implementation
-├── processing/
-│   ├── mod.rs                # Processing module exports
-│   ├── path_processor.rs     # Directory expansion and file enumeration
-│   ├── exclusions.rs         # Wildcard pattern matching and filtering
-│   └── validation.rs         # Path validation and filesystem checks
-├── services/
-│   ├── mod.rs                # Service module exports
-│   └── backup.rs             # Main backup orchestration service
-└── verification/
-    ├── mod.rs                # Verification module exports
-    ├── verifier.rs           # Archive content verification and comparison
-    ├── service.rs            # Verification workflow with retry and callbacks
-    └── display.rs            # Missing file display strategies
+├── main.rs                    # CLI and commands
+├── core/                     # Basic types and configuration
+├── io/                       # File reading and 7-Zip integration
+├── processing/               # Path handling and exclusions
+├── services/                 # Main backup logic
+└── verification/             # Archive verification and retry
 ```
 
-### Extension Points
+**To extend it:**
+- Add new input sources (databases, APIs) by implementing `InputReader`
+- Support new archive formats by implementing `Archiver`
+- Add validation logic by implementing `PathValidator`
 
-The modular architecture provides several extension points:
-
-1. **New Input Sources**: Implement `InputReader` trait for database queries, APIs, etc.
-2. **New Archive Formats**: Implement `Archiver` trait for tar, zip, rar support
-3. **New Validators**: Implement `PathValidator` trait for custom validation logic
-4. **New Verifiers**: Implement `ArchiveVerifier` trait for different archive tools
-5. **New Display Strategies**: Implement display patterns for verification results
-
-### Example Extensions
-
-**Adding PostgreSQL input source:**
-```rust
-use async_trait::async_trait;
-
-pub struct PostgresInputReader {
-    connection: PgConnection,
-    query: String,
-}
-
-#[async_trait]
-impl InputReader for PostgresInputReader {
-    async fn read_input_paths(&self) -> Result<Vec<String>> {
-        // Execute query and return file paths
-        Ok(self.connection.query(&self.query).await?)
-    }
-}
-```
-
-**Adding zip format support:**
-```rust
-use async_trait::async_trait;
-
-pub struct ZipArchiver {
-    compression_level: u8,
-}
-
-#[async_trait]
-impl Archiver for ZipArchiver {
-    async fn create_archive(&self, paths: &[String], output: &str) -> Result<()> {
-        // Use zip library or external zip command
-        Ok(())
-    }
-    
-    async fn add_to_archive(&self, paths: &[String], archive_path: &str) -> Result<()> {
-        // Add files to existing zip archive
-        Ok(())
-    }
-    
-    async fn is_available(&self) -> bool {
-        // Check if zip tools are available
-        true
-    }
-    
-    fn name(&self) -> &'static str {
-        "Zip Archiver"
-    }
-}
-```
-
-### Contributing Guidelines
-
-1. **Follow Rust conventions**: Use `cargo fmt` and `cargo clippy`
-2. **Write tests**: Maintain >90% test coverage
-3. **Document public APIs**: Use rustdoc comments
-4. **Handle errors properly**: Use `anyhow` for error propagation
-5. **Keep it simple**: Prefer composition over inheritance
-
-## Dependencies 📦
-
-### Production Dependencies
-
-- **`anyhow`** (1.0.98): Error handling and context chaining
-- **`async-trait`** (0.1.88): Async traits for dependency injection  
-- **`clap`** (4.5.38): Command line argument parsing with derive macros
-- **`regex`** (1.11.1): Pattern matching for exclusion wildcards
-- **`tempfile`** (3.20.0): Temporary file management for testing
-- **`tokio`** (1.45.1): Async runtime with full feature set
-- **`walkdir`** (2.5.0): Recursive directory traversal
-
-### Development Dependencies
-
-- **`indicatif`** (0.17.11): Progress bars for future CLI enhancements
-- **`tempfile`** (3.20.0): Test file and directory management
-
-### Dependency Rationale
-
-- ✅ **Minimal footprint**: Only essential, well-maintained crates
-- ✅ **Zero-cost abstractions**: No runtime performance overhead
-- ✅ **Ecosystem standards**: Widely adopted and battle-tested
-- ✅ **Active maintenance**: Regular security updates and improvements
-- ✅ **Async-first**: Built for modern Rust async patterns
-
-## Troubleshooting 🔍
-
-### Common Issues
-
-**"7z.exe not found" or "7z command failed"**
+**Development setup:**
 ```powershell
-# Install 7-Zip via Windows Package Manager
+cargo fmt       # Format code
+cargo clippy    # Check for issues
+cargo test      # Run tests
+```
+
+## Dependencies
+
+Uses these external libraries:
+- `clap` - Command line parsing
+- `regex` - Wildcard pattern matching
+- `walkdir` - Directory traversal
+- `tokio` - Async runtime
+- `anyhow` - Error handling
+- `tempfile` - Test file management
+
+## Troubleshooting
+
+**7-Zip not found:**
+```powershell
+# Install 7-Zip
 winget install 7zip.7zip
 
-# Or download from official site and specify custom path
-.\target\release\archtree.exe backup -f paths.txt -o backup.7z --7zip-path "C:\Program Files\7-Zip\7z.exe"
+# Or specify location
+archtree backup -f paths.txt -o backup.7z --7zip-path "C:\Program Files\7-Zip\7z.exe"
 
-# Verify 7-Zip is accessible
+# Check it's working
 7z --help
 ```
 
-**"Permission denied" errors**
-```powershell
-# Run PowerShell as Administrator for system directories
-# Check file/directory permissions on source paths
-# Ensure output directory is writable
+**Permission errors:**
+- Run as Administrator for system files
+- Check source file permissions
+- Make sure output directory is writable
 
-# Example: Check permissions
-Get-Acl "C:\path\to\file" | Format-List
-```
-
-**Input file encoding issues**
+**File encoding issues:**
 ```powershell
-# Ensure input files use UTF-8 encoding
-# PowerShell example to convert:
+# Convert to UTF-8
 Get-Content input.txt | Out-File -Encoding UTF8 input_utf8.txt
 ```
 
-**Archive verification failures**
+**Verification problems:**
 ```powershell
-# Check if paths in input file exist
+# Check if paths exist
 Get-Content paths.txt | ForEach-Object { Test-Path $_ }
 
-# Run verification separately to debug
-.\target\release\archtree.exe verify -a backup.7z -f paths.txt --retry
+# Debug verification
+archtree verify -a backup.7z -f paths.txt --retry
 ```
 
-**Build compilation errors**
+**Build errors:**
 ```powershell
-# Update Rust toolchain to latest stable
+# Update Rust
 rustup update stable
 
-# Clean build artifacts and rebuild
+# Clean rebuild
 cargo clean
 cargo build --release
-
-# Check for missing system dependencies
-rustc --version
-cargo --version
 ```
 
-**Test failures**
-```powershell
-# Run tests with output to see details
-cargo test -- --nocapture
+**Performance tips:**
+- Use exclusion patterns for large directories
+- Specify files instead of whole directories when possible
+- Split very large file lists (>100K files)
 
-# Run specific test
-cargo test test_backup_service -- --exact
+## Future ideas
 
-# Check if 7-Zip is in PATH for integration tests
-where.exe 7z
-```
-
-### Performance Issues
-
-**Slow directory traversal**
-- Large directories with many files benefit from exclusion patterns
-- Use specific file paths instead of broad directory includes when possible
-
-**Memory usage with large file lists**
-- The tool processes paths in batches to manage memory
-- Consider splitting very large input files (>100K paths)
-
-**Archive creation timeouts**
-- 7-Zip compression can be CPU intensive
-- Monitor system resources during backup operations
-
-## Potential Future Enhancements 🚀
-
-- [ ] **Progress bars** with `indicatif`
-- [ ] **Parallel archiving** for large datasets
-- [ ] **Archive types**: Go further than just 7z (e.g., tar, zip)
-- [ ] **Compression settings**: Allow user to specify compression methods and levels
-- [ ] **Configuration files** (TOML/YAML)
-- [ ] **GUI frontend** for non-technical users
-- [ ] **Library mode** for embedding in other Rust applications
+- Progress bars for long operations
+- Checking for file changes since last backup
+- Support for zip, tar, and other archive formats and compression methods
+- Configuration files instead of just command line options
+- Parallel processing for faster path handling
+- GUI version for less technical users
 
 ---
 
-**Happy Backing Up with Rust!** 🦀✨
-
-> No affiliation with 7-Zip. This is a personal project built for robust, everyday backup needs.
+This is a personal project - no affiliation with 7-Zip. Built for reliable daily backups.
