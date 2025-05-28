@@ -21,10 +21,13 @@ Takes a list of files and folders, creates compressed archives, and can verify t
 
 - **7-Zip** (install with `winget install 7zip.7zip`)
 - **Rust** to build from source (get it at [rustup.rs](https://rustup.rs/))
+- **Git** to clone the repository (install with `winget install Git.Git`)
 
 ### Install it
 
 ```powershell
+git clone https://github.com/Esensats/archtree.git
+cd archtree
 cargo install --path . --locked
 ```
 
