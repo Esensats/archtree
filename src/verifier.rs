@@ -40,6 +40,7 @@ pub trait ArchiveVerifier: Send + Sync {
 }
 
 /// 7-Zip based archive verifier implementation
+#[derive(Debug, Clone)]
 pub struct SevenZipVerifier {
     executable_path: String,
 }
@@ -505,7 +506,8 @@ where
         let normalized = path.to_lowercase();
 
         // Normalize path separators to forward slashes
-        normalized.replace('\\', "/")
+        // Replace backslashes with forward slashes and remove leading './' if present
+        normalized.replace('\\', "/").replace("./", "")
     }
 }
 
@@ -572,6 +574,10 @@ mod tests {
         );
         assert_eq!(
             service.normalize_path("relative\\path\\file.txt"),
+            "relative/path/file.txt"
+        );
+        assert_eq!(
+            service.normalize_path(".\\relative\\path\\file.txt"),
             "relative/path/file.txt"
         );
     }

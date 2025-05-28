@@ -131,7 +131,7 @@ where
         let input_paths = self.reader.read_paths().await?;
 
         if input_paths.is_empty() {
-            println!("No paths provided. Nothing to backup.");
+            eprintln!("No paths provided. Nothing to backup.");
             return Ok(());
         }
 
@@ -143,7 +143,7 @@ where
         let valid_paths = self.process_input_paths(&input_paths).await?;
 
         if valid_paths.is_empty() {
-            println!("No valid paths found. Nothing to backup.");
+            eprintln!("No valid paths found. Nothing to backup.");
             return Ok(());
         }
 
@@ -160,10 +160,12 @@ where
             .create_archive(&valid_paths, &self.config.output_path)
             .await?;
 
-        println!(
-            "✅ Archive created successfully at: {}",
-            self.config.output_path
-        );
+        if self.config.show_progress {
+            println!(
+                "✅ Archive created successfully at: {}",
+                self.config.output_path
+            );
+        }
 
         Ok(())
     }

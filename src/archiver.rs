@@ -58,6 +58,7 @@ impl Archiver for SevenZipArchiver {
         let mut cmd = Command::new(&self.executable_path);
         cmd.args([
             "a",                                       // Add to archive
+            "-spf",                                    // Use full paths
             "-t7z",                                    // 7z format
             output_path,                               // Output archive path
             &format!("@{}", temp_list_path.display()), // Input file list
@@ -95,6 +96,8 @@ impl Archiver for SevenZipArchiver {
         let mut cmd = Command::new(&self.executable_path);
         cmd.args([
             "u",                                       // Update archive (add if not exists)
+            "-spf",                                    // Use full paths
+            "-t7z",                                    // 7z format
             archive_path,                              // Archive path
             &format!("@{}", temp_list_path.display()), // Input file list
         ])
