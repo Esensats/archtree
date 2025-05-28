@@ -1,14 +1,10 @@
-use crate::{
-    archiver::Archiver,
-    config::Config,
-    input::InputReader,
-    path_processor::{PathProcessor, ProcessingStatus, WildcardMatcher},
-};
-use anyhow::Result;
+use crate::core::{Config, Result, ArchtreeError, ErrorContext};
+use crate::io::{Archiver, InputReader};
+use crate::processing::{PathProcessor, ProcessingStatus, WildcardMatcher};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Simplified backup service using the new path processing algorithm
+/// Backup service using the improved path processing algorithm
 pub struct BackupService<A>
 where
     A: Archiver,
@@ -41,39 +37,42 @@ where
         }
 
         let processed_paths = self.process_input_paths().await?;
-        let string_paths = processed_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        let string_paths = processed_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
         let _ = self.processed_paths.set(processed_paths);
         Ok(string_paths)
     }
 
     /// Process input paths using the improved algorithm
     async fn process_input_paths(&self) -> Result<Vec<PathBuf>> {
-        let input_paths = self.reader.read_paths().await?;
+        let input_paths = self.reader.read_paths().await
+            .context_io("Failed to read input paths")?;
 
         if input_paths.is_empty() {
-            if self.config.show_progress {
-                println!("No paths provided. Nothing to backup.");
-            }
-            return Ok(vec![]);
+            return Err(ArchtreeError::config("No input paths provided"));
         }
 
         // Extract exclusion patterns from input
         let (include_paths, exclude_patterns) = PathProcessor::extract_exclusion_patterns(&input_paths);
 
         if !exclude_patterns.is_empty() && self.config.show_progress {
-            println!("📝 Found {} exclusion patterns.", exclude_patterns.len());
+            println!("Found {} exclusion patterns:", exclude_patterns.len());
+            for pattern in &exclude_patterns {
+                println!("  🚫 {}", pattern);
+            }
         }
 
         if include_paths.is_empty() {
-            if self.config.show_progress {
-                println!("No paths to backup after extracting exclusion patterns.");
-            }
-            return Ok(vec![]);
+            return Err(ArchtreeError::config("No include paths found after filtering exclusions"));
         }
 
         // Create path processor and matcher
-        let mut processor = PathProcessor::new(include_paths, exclude_patterns)?;
-        let matcher = WildcardMatcher::with_patterns(processor.exclusion_patterns())?;
+        let mut processor = PathProcessor::new(include_paths, exclude_patterns)
+            .context_config("Failed to create path processor")?;
+        let matcher = WildcardMatcher::with_patterns(processor.exclusion_patterns())
+            .context_config("Failed to create wildcard matcher")?;
 
         // Track statistics for reporting
         let mut added_count = 0;
@@ -81,40 +80,44 @@ where
         let mut invalid_count = 0;
 
         // Process paths using the improved algorithm
-        let processed_paths = processor.process_paths(
-            |path, status| {
-                match status {
+        let processed_paths = processor
+            .process_paths(
+                |path, status| match status {
                     ProcessingStatus::Added => {
                         added_count += 1;
                         if self.config.show_progress {
                             println!("✓ {}", path.display());
                         }
-                    },
+                    }
                     ProcessingStatus::Excluded => {
                         excluded_count += 1;
                         if self.config.show_progress {
                             println!("🚫 Excluded: {}", path.display());
                         }
-                    },
+                    }
                     ProcessingStatus::Invalid(ref error) => {
                         invalid_count += 1;
-                        eprintln!("⚠️  Invalid path {}: {}", path.display(), error);
-                    },
-                }
-            },
-            &matcher,
-        ).await?;
+                        if self.config.show_progress {
+                            eprintln!("⚠️  Invalid path: {} ({})", path.display(), error);
+                        }
+                    }
+                },
+                &matcher,
+            )
+            .await
+            .context_config("Failed to process paths")?;
 
         // Report final statistics
         if self.config.show_progress {
-            println!("📊 Processing complete:");
-            println!("   ✓ {} files added", added_count);
+            println!("\n📊 Processing Summary:");
+            println!("  ✓ Added: {} files", added_count);
             if excluded_count > 0 {
-                println!("   🚫 {} files excluded", excluded_count);
+                println!("  🚫 Excluded: {} files", excluded_count);
             }
             if invalid_count > 0 {
-                println!("   ⚠️  {} invalid paths", invalid_count);
+                println!("  ⚠️  Invalid: {} paths", invalid_count);
             }
+            println!("  📁 Total for archive: {} files", processed_paths.len());
         }
 
         Ok(processed_paths)
@@ -124,10 +127,10 @@ where
     pub async fn run(&self) -> Result<()> {
         // Check if archiver is available
         if !self.archiver.is_available().await {
-            anyhow::bail!(
-                "{} is not available. Please install it or check your PATH.",
-                self.archiver.name()
-            );
+            return Err(ArchtreeError::external_tool(
+                self.archiver.name(),
+                format!("{} is not available on this system", self.archiver.name())
+            ));
         }
 
         if self.config.show_progress {
@@ -138,16 +141,14 @@ where
         let processed_paths = self.process_input_paths().await?;
 
         if processed_paths.is_empty() {
-            eprintln!("No valid paths found. Nothing to backup.");
-            return Ok(());
+            return Err(ArchtreeError::config("No valid paths found to archive"));
         }
 
         // Cache the processed paths for potential later use (e.g., verification)
         let _ = self.processed_paths.set(processed_paths.clone());
 
         if self.config.show_progress {
-            println!("📦 Found {} valid files to archive.", processed_paths.len());
-            println!("🗜️  Creating archive at: {}", self.config.output_path);
+            println!("\n📦 Creating archive: {}", self.config.output_path);
         }
 
         // Convert paths to strings for archiver compatibility
@@ -159,13 +160,11 @@ where
         // Create archive
         self.archiver
             .create_archive(&string_paths, &self.config.output_path)
-            .await?;
+            .await
+            .context_io("Failed to create archive")?;
 
         if self.config.show_progress {
-            println!(
-                "✅ Archive created successfully at: {}",
-                self.config.output_path
-            );
+            println!("✅ Archive created successfully: {}", self.config.output_path);
         }
 
         Ok(())
@@ -175,15 +174,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        archiver::SevenZipArchiver,
-        input::VecReader,
-    };
+    use crate::io::{SevenZipArchiver, VecReader};
     use std::fs;
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn test_new_backup_service_with_valid_paths() {
+    async fn test_backup_service_with_valid_paths() {
         // Create temporary test files
         let temp_dir = TempDir::new().unwrap();
         let test_file1 = temp_dir.path().join("test1.txt");
@@ -198,81 +194,54 @@ mod tests {
             test_file1.to_string_lossy().to_string(),
             test_file2.to_string_lossy().to_string(),
             test_file3.to_string_lossy().to_string(),
-            "!*.tmp".to_string(), // Exclude .tmp files
+            "!*.tmp".to_string(),
         ];
 
         let archiver = SevenZipArchiver::new();
-        let reader: Box<dyn InputReader> = Box::new(VecReader::new(paths));
-
-        let output_archive = temp_dir.path().join("test.7z");
+        let reader = Box::new(VecReader::new(paths));
         let config = Config::builder()
-            .output_path(Some(&output_archive.to_string_lossy()), false)
-            .show_progress(false) // Disable progress for tests
+            .output_path(Some("test.7z"), false)
+            .show_progress(false)
             .build()
-            .expect("Failed to create config");
+            .unwrap();
 
         let service = BackupService::new(archiver, reader, config);
+        let input_paths = service.get_input_paths().await.unwrap();
 
-        // Skip test if 7-Zip is not available
-        if !service.archiver.is_available().await {
-            return;
-        }
-
-        let result = service.run().await;
-
-        // Check if backup completed successfully
-        if result.is_ok() {
-            assert!(output_archive.exists());
-            
-            // Verify that only .txt files were processed (not .tmp)
-            let processed_paths = service.get_input_paths().await.unwrap();
-            assert_eq!(processed_paths.len(), 2); // Only test1.txt and test2.txt
-            assert!(processed_paths.iter().any(|p| p.contains("test1.txt")));
-            assert!(processed_paths.iter().any(|p| p.contains("test2.txt")));
-            assert!(!processed_paths.iter().any(|p| p.contains("test3.tmp")));
-        }
+        // Should have test1.txt and test2.txt, but not test3.tmp (excluded)
+        assert_eq!(input_paths.len(), 2);
+        assert!(input_paths.iter().any(|p| p.contains("test1.txt")));
+        assert!(input_paths.iter().any(|p| p.contains("test2.txt")));
+        assert!(!input_paths.iter().any(|p| p.contains("test3.tmp")));
     }
 
     #[tokio::test]
     async fn test_relative_path_conversion() {
-        // Test that relative paths are converted to absolute paths
+        // Create temporary test structure
         let temp_dir = TempDir::new().unwrap();
-        
-        // Change to temp directory
+        let test_file = temp_dir.path().join("relative_test.txt");
+        fs::write(&test_file, "Content").unwrap();
+
+        // Change to temp directory and use relative path
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&temp_dir).unwrap();
-        
-        let test_file = temp_dir.path().join("relative_test.txt");
-        fs::write(&test_file, "relative content").unwrap();
 
-        let paths = vec![
-            "relative_test.txt".to_string(), // Relative path
-        ];
-
+        let paths = vec!["relative_test.txt".to_string()];
         let archiver = SevenZipArchiver::new();
-        let reader: Box<dyn InputReader> = Box::new(VecReader::new(paths));
-
-        let output_archive = temp_dir.path().join("relative_test.7z");
+        let reader = Box::new(VecReader::new(paths));
         let config = Config::builder()
-            .output_path(Some(&output_archive.to_string_lossy()), false)
+            .output_path(Some("test.7z"), false)
             .show_progress(false)
             .build()
-            .expect("Failed to create config");
+            .unwrap();
 
         let service = BackupService::new(archiver, reader, config);
+        let input_paths = service.get_input_paths().await.unwrap();
 
-        // Skip test if 7-Zip is not available
-        if service.archiver.is_available().await {
-            let result = service.run().await;
-            
-            if result.is_ok() {
-                // Verify the processed path is absolute
-                let processed_paths = service.get_input_paths().await.unwrap();
-                assert_eq!(processed_paths.len(), 1);
-                let processed_path = &processed_paths[0];
-                assert!(PathBuf::from(processed_path).is_absolute());
-            }
-        }
+        // Should have absolute path
+        assert_eq!(input_paths.len(), 1);
+        assert!(input_paths[0].contains("relative_test.txt"));
+        assert!(PathBuf::from(&input_paths[0]).is_absolute());
 
         // Restore original directory
         std::env::set_current_dir(original_dir).unwrap();

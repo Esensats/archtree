@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::core::{Result, ErrorContext};
 use async_trait::async_trait;
 use std::io::{self, BufRead};
 
@@ -31,7 +31,7 @@ impl InputReader for StdinReader {
         let mut paths = Vec::new();
 
         for line in stdin.lock().lines() {
-            let line = line.context("Failed to read line from stdin")?;
+            let line = line.context_io("Failed to read line from stdin")?;
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 paths.push(trimmed.to_string());
@@ -60,7 +60,7 @@ impl InputReader for FileReader {
     async fn read_paths(&self) -> Result<Vec<String>> {
         let content = tokio::fs::read_to_string(&self.file_path)
             .await
-            .context(format!("Failed to read file: {}", self.file_path))?;
+            .context_io(format!("Failed to read file: {}", self.file_path))?;
 
         let paths = content
             .lines()

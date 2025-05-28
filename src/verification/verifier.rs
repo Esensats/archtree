@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::core::{Result, ErrorContext, ArchtreeError};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -31,6 +31,13 @@ pub trait ArchiveVerifier: Send + Sync {
             .map(|entry| entry.path)
             .collect())
     }
+
+    /// Verify that all expected files are present in the archive
+    async fn verify_archive(
+        &self,
+        archive_path: &str,
+        expected_paths: &[String],
+    ) -> Result<VerificationResult>;
 
     /// Check if the verifier is available on the system
     async fn is_available(&self) -> bool;
@@ -79,17 +86,15 @@ impl ArchiveVerifier for SevenZipVerifier {
         let output = cmd
             .output()
             .await
-            .context("Failed to execute 7z list command")?;
+            .context_io("Failed to execute 7z list command")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            anyhow::bail!(
-                "7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}",
-                stderr,
-                stdout,
-                stderr
-            );
+            return Err(ArchtreeError::external_tool(
+                "7z",
+                format!("7z list command failed:\nERROR: {}\n{}\n\nSystem ERROR:\n{}", stderr, stdout, stderr)
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -160,6 +165,68 @@ impl ArchiveVerifier for SevenZipVerifier {
     fn name(&self) -> &'static str {
         "7-Zip Verifier"
     }
+
+    async fn verify_archive(
+        &self,
+        archive_path: &str,
+        expected_paths: &[String],
+    ) -> Result<VerificationResult> {
+        // Check if verifier is available
+        if !self.is_available().await {
+            return Err(ArchtreeError::external_tool(self.name(), "is not available"));
+        }
+
+        // Expand input paths to get all individual files
+        let expanded_expected_files = expand_input_paths(expected_paths).await?;
+
+        // Get archive entries
+        let archive_entries = self.list_archive_entries(archive_path).await?;
+
+        // Extract just the files from archive entries
+        let archived_files: Vec<&ArchiveEntry> = archive_entries
+            .iter()
+            .filter(|entry| !entry.is_directory)
+            .collect();
+
+        let archived_file_paths: Vec<String> = archived_files
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect();
+
+        // Compare expected vs archived files
+        let (missing_files, found_files) =
+            compare_file_lists(&expanded_expected_files, &archived_file_paths);
+
+        let total_archived = found_files.len();
+
+        Ok(VerificationResult {
+            missing_files,
+            archived_files: found_files,
+            all_expected_files: expanded_expected_files.clone(),
+            total_expected: expanded_expected_files.len(),
+            total_archived,
+        })
+    }
+}
+
+/// Compare two file lists and return (missing_files, found_files)
+fn compare_file_lists(expected: &[String], archived: &[String]) -> (Vec<String>, Vec<String>) {
+    let archived_set: HashSet<&String> = archived.iter().collect();
+    let _expected_set: HashSet<&String> = expected.iter().collect();
+    
+    let missing_files: Vec<String> = expected
+        .iter()
+        .filter(|&file| !archived_set.contains(file))
+        .cloned()
+        .collect();
+    
+    let found_files: Vec<String> = expected
+        .iter()
+        .filter(|&file| archived_set.contains(file))
+        .cloned()
+        .collect();
+    
+    (missing_files, found_files)
 }
 
 /// Recursively enumerate all files in a directory
@@ -417,7 +484,7 @@ where
     ) -> Result<VerificationResult> {
         // Check if verifier is available
         if !self.verifier.is_available().await {
-            anyhow::bail!("{} is not available", self.verifier.name());
+            return Err(ArchtreeError::external_tool(self.verifier.name(), "is not available"));
         }
 
         // Expand input paths to get all individual files

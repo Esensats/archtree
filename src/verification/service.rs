@@ -1,12 +1,12 @@
 use crate::{
-    archiver::Archiver,
-    display,
-    validator::PathValidator,
-    verifier::{
-        ArchiveVerifier, VerificationResult, VerificationService as CoreVerificationService,
+    core::Result,
+    io::Archiver,
+    processing::validation::PathValidator,
+    verification::{
+        verifier::{ArchiveVerifier, VerificationResult},
+        display,
     },
 };
-use anyhow::Result;
 
 /// Events that occur during verification process
 #[derive(Debug, Clone)]
@@ -151,9 +151,8 @@ impl VerificationAndRetryService {
     {
         callback.on_event(VerificationEvent::Starting);
 
-        // Create verification service
-        let verification_service = CoreVerificationService::new(verifier.clone());
-        let result = verification_service
+        // Verify archive directly with the verifier
+        let result = verifier
             .verify_archive(archive_path, input_paths)
             .await?;
 
@@ -233,8 +232,7 @@ impl VerificationAndRetryService {
             });
 
             // Verify again after retry
-            let verification_service = CoreVerificationService::new(verifier.clone());
-            let retry_result = verification_service
+            let retry_result = verifier
                 .verify_archive(archive_path, input_paths)
                 .await?;
 

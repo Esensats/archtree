@@ -1,16 +1,21 @@
-# Rust Implementation of PowerShell Backup Tool 🦀
+# archtree 🦀
 
-This is a high-performance, modular Rust implementation of the PowerShell backup tool. It provides the same functionality as the original PowerShell script but with better performance, strong typing, and comprehensive testing.
+A backup tool that creates and verifies compressed archives using 7-Zip.
+
+Takes input paths and creates or verifies a 7-Zip archive with preserved directory structure. Supports verification of archive contents and automatic retries for missing files.
+
+> Why "archtree"? Because it builds an *arch*ive, preserving the hier*arch*y of your filesystem *tree*! 🌳
+>
+> No affiliation with 7-Zip nor Arch Linux. This is a personal project that I use for my own backups and wanted to share with the community.
 
 ## Features ✨
 
 - **🏗️ Modular Architecture**: Trait-based design for easy testing and extensibility
 - **⚡ High Performance**: Async I/O and efficient file handling
 - **🧪 Comprehensive Testing**: Unit tests with >95% coverage, no filesystem nuking
-- **🔧 Command Line Interface**: Full CLI with help, options, and PowerShell compatibility
+- **🔧 Command Line Interface**: Full CLI with help and options
 - **🔒 Memory Safety**: Rust's ownership system prevents common bugs
 - **📦 Zero-copy Operations**: Direct archiving without intermediate staging
-- **🌍 Environment Variable Support**: Full compatibility with PowerShell version
 - **✅ Archive Verification**: Verify that all files were successfully backed up
 - **🔄 Automatic Retry**: Automatically retry missing files with intelligent detection
 

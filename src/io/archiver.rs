@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::core::{Result, ErrorContext, ArchtreeError};
 use async_trait::async_trait;
 use tokio::process::Command;
 
@@ -19,6 +19,7 @@ pub trait Archiver: Send + Sync {
 }
 
 /// 7-Zip based archiver implementation
+#[derive(Clone)]
 pub struct SevenZipArchiver {
     executable_path: String,
 }
@@ -52,7 +53,7 @@ impl Archiver for SevenZipArchiver {
         let list_content = paths.join("\r\n"); // Use Windows line endings
         tokio::fs::write(&temp_list_path, list_content.as_bytes())
             .await
-            .context("Failed to write path list to temporary file")?;
+            .context_io("Failed to write path list to temporary file")?;
 
         // Build 7-Zip command
         let mut cmd = Command::new(&self.executable_path);
@@ -67,7 +68,7 @@ impl Archiver for SevenZipArchiver {
         .env("LC_ALL", "en_US.UTF-8"); // Override locale settings
 
         // Execute the command
-        let output = cmd.output().await.context("Failed to execute 7z command")?;
+        let output = cmd.output().await.context_external("7z", "Failed to execute 7z command")?;
 
         // Clean up the temporary file
         let _ = tokio::fs::remove_file(&temp_list_path).await;
@@ -75,7 +76,10 @@ impl Archiver for SevenZipArchiver {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            anyhow::bail!("7z command failed:\nStderr: {}\nStdout: {}", stderr, stdout);
+            return Err(crate::core::ArchtreeError::external_tool(
+                "7z", 
+                format!("7z command failed:\nStderr: {}\nStdout: {}", stderr, stdout)
+            ));
         }
 
         Ok(())
@@ -90,7 +94,7 @@ impl Archiver for SevenZipArchiver {
         let list_content = paths.join("\r\n"); // Use Windows line endings
         tokio::fs::write(&temp_list_path, list_content.as_bytes())
             .await
-            .context("Failed to write path list to temporary file")?;
+            .context_io("Failed to write path list to temporary file")?;
 
         // Build 7-Zip command (use 'u' for update instead of 'a' for add)
         let mut cmd = Command::new(&self.executable_path);
@@ -108,7 +112,7 @@ impl Archiver for SevenZipArchiver {
         let output = cmd
             .output()
             .await
-            .context("Failed to execute 7z update command")?;
+            .context_io("Failed to execute 7z update command")?;
 
         // Clean up the temporary file
         let _ = tokio::fs::remove_file(&temp_list_path).await;
@@ -116,11 +120,10 @@ impl Archiver for SevenZipArchiver {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            anyhow::bail!(
-                "7z update command failed:\nStderr: {}\nStdout: {}",
-                stderr,
-                stdout
-            );
+            return Err(ArchtreeError::external_tool(
+                "7z",
+                format!("7z update command failed:\nStderr: {}\nStdout: {}", stderr, stdout)
+            ));
         }
 
         Ok(())

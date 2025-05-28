@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::core::{Result, ErrorContext};
 use async_trait::async_trait;
 use regex::Regex;
 use std::collections::HashSet;
@@ -20,7 +20,7 @@ pub struct PathProcessor {
 pub trait ExclusionMatcher: Send + Sync {
     /// Check if a path should be excluded based on the pattern
     fn matches(&self, path: &Path, pattern: &str) -> bool;
-    
+
     /// Get a human-readable description of this matcher strategy
     fn description(&self) -> &'static str;
 }
@@ -39,14 +39,14 @@ impl WildcardMatcher {
 
     pub fn with_patterns(patterns: &[String]) -> Result<Self> {
         let mut compiled_patterns = Vec::new();
-        
+
         for pattern in patterns {
             let regex_pattern = Self::wildcard_to_regex(pattern);
             let regex = Regex::new(&regex_pattern)
-                .with_context(|| format!("Invalid exclusion pattern: {}", pattern))?;
+                .context_config(format!("Invalid exclusion pattern: {}", pattern))?;
             compiled_patterns.push((pattern.clone(), regex));
         }
-        
+
         Ok(Self { compiled_patterns })
     }
 
@@ -83,14 +83,14 @@ impl ExclusionMatcher for WildcardMatcher {
     fn matches(&self, path: &Path, _pattern: &str) -> bool {
         // Normalize path for comparison (handle Windows/Unix differences)
         let path_str = path.to_string_lossy().to_lowercase().replace('\\', "/");
-        
+
         // Check against all compiled patterns
         for (_original, regex) in &self.compiled_patterns {
             if regex.is_match(&path_str) {
                 return true;
             }
         }
-        
+
         false
     }
 
@@ -135,12 +135,11 @@ impl PathProcessor {
     /// Convert a path to absolute path, handling both absolute and relative paths
     pub async fn to_absolute_path(path: &str) -> Result<PathBuf> {
         let path_buf = PathBuf::from(path);
-        
+
         if path_buf.is_absolute() {
             Ok(path_buf)
         } else {
-            let current_dir = std::env::current_dir()
-                .context("Failed to get current directory")?;
+            let current_dir = std::env::current_dir().context_io("Failed to get current directory")?;
             Ok(current_dir.join(path_buf))
         }
     }
@@ -157,7 +156,11 @@ impl PathProcessor {
 
     /// Process all input paths according to the improved algorithm
     /// Returns an iterator-like interface that yields paths one by one
-    pub async fn process_paths<F>(&mut self, mut on_path: F, matcher: &dyn ExclusionMatcher) -> Result<Vec<PathBuf>>
+    pub async fn process_paths<F>(
+        &mut self,
+        mut on_path: F,
+        matcher: &dyn ExclusionMatcher,
+    ) -> Result<Vec<PathBuf>>
     where
         F: FnMut(&PathBuf, ProcessingStatus),
     {
@@ -165,7 +168,7 @@ impl PathProcessor {
 
         for input_path in &self.input_paths.clone() {
             let absolute_path = Self::to_absolute_path(input_path).await?;
-            
+
             // Step 1: Check against exclusion patterns (skip if matches)
             if self.should_exclude(&absolute_path, matcher) {
                 on_path(&absolute_path, ProcessingStatus::Excluded);
@@ -184,7 +187,8 @@ impl PathProcessor {
             // Step 3: Process based on whether it's a directory or file
             if metadata.is_dir() {
                 // Step 3.2: If it's a directory, expand it
-                self.process_directory(&absolute_path, &mut result_paths, &mut on_path, matcher).await?;
+                self.process_directory(&absolute_path, &mut result_paths, &mut on_path, matcher)
+                    .await?;
             } else {
                 // Step 3.3: If it's a file, add it (if not already added)
                 if self.yielded_paths.insert(absolute_path.clone()) {
@@ -219,7 +223,7 @@ impl PathProcessor {
             };
 
             let path = entry.path().to_path_buf();
-            
+
             // Skip if it's a directory (we only want files)
             if entry.file_type().is_dir() {
                 continue;
@@ -319,17 +323,21 @@ mod tests {
             "!*.tmp".to_string(),
         ];
 
-        let (include_paths, exclude_patterns) = PathProcessor::extract_exclusion_patterns(&input_paths);
+        let (include_paths, exclude_patterns) =
+            PathProcessor::extract_exclusion_patterns(&input_paths);
         let mut processor = PathProcessor::new(include_paths, exclude_patterns).unwrap();
         let matcher = WildcardMatcher::with_patterns(&processor.exclusion_patterns).unwrap();
 
         let mut statuses = Vec::new();
-        let result_paths = processor.process_paths(
-            |path, status| {
-                statuses.push((path.clone(), status));
-            },
-            &matcher,
-        ).await.unwrap();
+        let result_paths = processor
+            .process_paths(
+                |path, status| {
+                    statuses.push((path.clone(), status));
+                },
+                &matcher,
+            )
+            .await
+            .unwrap();
 
         // Should have test1.txt and test3.txt, but not test2.tmp (excluded)
         assert_eq!(result_paths.len(), 2);

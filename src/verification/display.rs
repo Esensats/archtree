@@ -1,5 +1,5 @@
 /// Strategies for displaying missing files
-use crate::verifier::VerificationResult;
+use crate::verification::verifier::VerificationResult;
 
 /// Trait for different missing file display strategies
 pub trait MissingFileDisplayStrategy {
@@ -81,7 +81,6 @@ impl MissingFileDisplayContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::verifier::VerificationResult;
 
     #[test]
     fn test_detailed_strategy_name() {
