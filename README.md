@@ -414,7 +414,8 @@ where.exe 7z
 
 - [ ] **Progress bars** with `indicatif`
 - [ ] **Parallel archiving** for large datasets
-- [ ] **Compression methods** (zstd, lz4, brotli)
+- [ ] **Archive types**: Go further than just 7z (e.g., tar, zip)
+- [ ] **Compression settings**: Allow user to specify compression methods and levels
 - [ ] **Configuration files** (TOML/YAML)
 - [ ] **GUI frontend** for non-technical users
 - [ ] **Library mode** for embedding in other Rust applications

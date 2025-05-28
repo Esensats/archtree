@@ -1,9 +1,0 @@
-test_files\test1.txt
-test_files\nested\cache\data.tmp
-test_files\nested\cache\data.txt
-C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\nested\cache\data.txt
-test_files\deep\very
-C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\important
-!*.tmp
-!*cache*
-test_files\test2.txt
