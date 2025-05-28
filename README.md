@@ -420,12 +420,8 @@ where.exe 7z
 - [ ] **GUI frontend** for non-technical users
 - [ ] **Library mode** for embedding in other Rust applications
 
-## License 📄
-
-This project is provided as-is for personal and educational use.
-
-> No affiliation with 7-Zip. This is a personal project built for robust, everyday backup needs.
-
 ---
 
 **Happy Backing Up with Rust!** 🦀✨
+
+> No affiliation with 7-Zip. This is a personal project built for robust, everyday backup needs.
