@@ -1,0 +1,11 @@
+test_files/test1.txt
+test_files/test2.txt
+test_files/cache_data.json
+test_files/cache.tmp
+test_files/temp_file.tmp
+test_files/important.doc
+test_files/important/document.pdf
+test_files/nested/cache/cache_file.txt
+test_files/deep/very/deep_file.txt
+!*.tmp
+!**/cache/**

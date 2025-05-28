@@ -1,0 +1,7 @@
+C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\test1.txt
+C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\test2.txt
+C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\test3.txt
+!*.tmp
+C:\Users\these\Desktop\pwsh_backup_tool\rust\test_files\test4.txt
+!*cache*
+C:\Users\these\Desktop\pwsh_backup_tool\rust\Cargo.toml
