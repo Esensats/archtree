@@ -61,7 +61,7 @@ impl Archiver for SevenZipArchiver {
             "a",                                       // Add to archive
             "-spf",                                    // Use full paths
             "-sccUTF-8",                               // Force UTF-8 output
-            "-t7z",                                    // 7z format
+            "-tzip",                                   // 7z format
             output_path,                               // Output archive path
             &format!("@{}", temp_list_path.display()), // Input file list
         ]);
@@ -113,7 +113,7 @@ impl Archiver for SevenZipArchiver {
             "u",                                       // Update archive (add if not exists)
             "-spf",                                    // Use full paths
             "-sccUTF-8",                               // Force UTF-8 output
-            "-t7z",                                    // 7z format
+            "-tzip",                                   // 7z format
             &archive_path,                             // Archive path
             &format!("@{}", temp_list_path.display()), // Input file list
         ]);

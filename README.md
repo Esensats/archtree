@@ -36,22 +36,22 @@ cargo install --path . --locked
 **Make a backup:**
 ```powershell
 # From a file list
-archtree backup -f my_files.txt -o backup.7z
+archtree backup -f my_files.txt -o backup.zip
 
 # From stdin (pipe in file paths)
-Get-Content file_list.txt | archtree backup -o backup.7z
+Get-Content file_list.txt | archtree backup -o backup.zip
 
 # Create and verify in one go
-archtree backup -f my_files.txt -o backup.7z --verify --retry
+archtree backup -f my_files.txt -o backup.zip --verify --retry
 ```
 
 **Check an existing backup:**
 ```powershell
 # Just verify what's in there
-archtree verify -a backup.7z -f original_list.txt
+archtree verify -a backup.zip -f original_list.txt
 
 # Verify and add anything that's missing
-archtree verify -a backup.7z -f file_list.txt --retry
+archtree verify -a backup.zip -f file_list.txt --retry
 ```
 
 ## Commands
@@ -219,7 +219,7 @@ Uses these external libraries:
 winget install 7zip.7zip
 
 # Or specify location
-archtree backup -f paths.txt -o backup.7z --7zip-path "C:\Program Files\7-Zip\7z.exe"
+archtree backup -f paths.txt -o backup.zip --7zip-path "C:\Program Files\7-Zip\7z.exe"
 
 # Check it's working
 7z --help
@@ -242,7 +242,7 @@ Get-Content input.txt | Out-File -Encoding UTF8 input_utf8.txt
 Get-Content paths.txt | ForEach-Object { Test-Path $_ }
 
 # Debug verification
-archtree verify -a backup.7z -f paths.txt --retry
+archtree verify -a backup.zip -f paths.txt --retry
 ```
 
 **Build errors:**
@@ -263,8 +263,8 @@ cargo build --release
 ## Future ideas
 
 - Progress bars for long operations
-- Checking for file changes since last backup
-- Support for zip, tar, and other archive formats and compression methods
+- ~~Checking for file changes since last backup~~ Already implemented
+- Support for tar and other archive formats and compression methods
 - Configuration files instead of just command line options
 - Parallel processing for faster path handling
 - GUI version for less technical users
