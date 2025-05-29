@@ -1,7 +1,9 @@
 use crate::core::{ArchtreeError, ErrorContext, Result};
 use async_trait::async_trait;
+use chrono::{NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::SystemTime;
 use tokio::fs;
 use tokio::process::Command;
 
@@ -14,6 +16,8 @@ pub struct ArchiveEntry {
     pub is_directory: bool,
     /// File size (0 for directories)
     pub size: u64,
+    /// Modification time of the file when it was archived (None for directories or if unavailable)
+    pub modified: Option<SystemTime>,
 }
 
 /// Trait for archive verification strategies
@@ -38,6 +42,13 @@ pub trait ArchiveVerifier: Send + Sync {
         archive_path: &str,
         expected_paths: &[String],
     ) -> Result<VerificationResult>;
+
+    /// Verify that files in the archive are up to date with the filesystem
+    async fn verify_archive_freshness(
+        &self,
+        archive_path: &str,
+        expected_paths: &[String],
+    ) -> Result<FreshnessVerificationResult>;
 
     /// Check if the verifier is available on the system
     async fn is_available(&self) -> bool;
@@ -175,6 +186,7 @@ impl SevenZipVerifier {
                         path,
                         is_directory: false, // Will be set by Attributes line
                         size: 0,             // Will be set by Size line
+                        modified: None,      // Will be set by Modified line
                     });
                 }
             } else if line.starts_with("Attributes = ") && current_entry.is_some() {
@@ -190,6 +202,24 @@ impl SevenZipVerifier {
                     if let Ok(size) = size_str.parse::<u64>() {
                         if let Some(ref mut entry) = current_entry {
                             entry.size = size;
+                        }
+                    }
+                }
+            } else if line.starts_with("Modified = ") && current_entry.is_some() {
+                // Parse modification time from 7-Zip format "YYYY-MM-DD HH:MM:SS"
+                if let Some(modified_str) = line.strip_prefix("Modified = ") {
+                    if let Ok(naive_dt) =
+                        NaiveDateTime::parse_from_str(modified_str, "%Y-%m-%d %H:%M:%S")
+                    {
+                        // 7-Zip shows local time, so treat it as local time and convert to SystemTime
+                        // We'll assume local timezone for the archive timestamps
+                        use chrono::Local;
+                        let local_dt = Local.from_local_datetime(&naive_dt).single();
+                        if let Some(local_time) = local_dt {
+                            let system_time = SystemTime::from(local_time);
+                            if let Some(ref mut entry) = current_entry {
+                                entry.modified = Some(system_time);
+                            }
                         }
                     }
                 }
@@ -278,6 +308,91 @@ impl ArchiveVerifier for SevenZipVerifier {
             all_expected_files: expanded_expected_files.clone(),
             total_expected: expanded_expected_files.len(),
             total_archived,
+        })
+    }
+
+    async fn verify_archive_freshness(
+        &self,
+        archive_path: &str,
+        expected_paths: &[String],
+    ) -> Result<FreshnessVerificationResult> {
+        // Check if verifier is available
+        if !self.is_available().await {
+            return Err(ArchtreeError::external_tool(
+                self.name(),
+                "is not available",
+            ));
+        }
+
+        // Expand input paths to get all individual files
+        let expanded_expected_files = expand_input_paths(expected_paths).await?;
+
+        // Get archive entries
+        let archive_entries = self.list_archive_entries(archive_path).await?;
+
+        // Build a map of archive entries by path for quick lookup
+        let archive_map: HashMap<String, &ArchiveEntry> = archive_entries
+            .iter()
+            .filter(|entry| !entry.is_directory)
+            .map(|entry| (entry.path.clone(), entry))
+            .collect();
+
+        let mut outdated_files = Vec::new();
+        let mut up_to_date_files = Vec::new();
+        let mut unverifiable_files = Vec::new();
+
+        // Check each expected file for freshness
+        for file_path in &expanded_expected_files {
+            if let Some(archive_entry) = archive_map.get(file_path) {
+                // File exists in archive, check if it's up to date
+                match (archive_entry.modified, fs::metadata(file_path).await) {
+                    (Some(archive_modified), Ok(fs_metadata)) => {
+                        if let Ok(fs_modified) = fs_metadata.modified() {
+                            // Calculate time difference in seconds
+                            let time_diff = if fs_modified > archive_modified {
+                                fs_modified
+                                    .duration_since(archive_modified)
+                                    .unwrap_or_default()
+                                    .as_secs()
+                            } else {
+                                0
+                            };
+
+                            // Consider files up to date if they're within 2 seconds
+                            // This accounts for precision differences between archive and filesystem timestamps
+                            const FRESHNESS_TOLERANCE_SECONDS: u64 = 2;
+
+                            if time_diff > FRESHNESS_TOLERANCE_SECONDS {
+                                // Filesystem version is significantly newer
+                                outdated_files.push(OutdatedFile {
+                                    path: file_path.clone(),
+                                    archive_modified: Some(archive_modified),
+                                    filesystem_modified: Some(fs_modified),
+                                });
+                            } else {
+                                // Archive version is up to date (within tolerance)
+                                up_to_date_files.push(file_path.clone());
+                            }
+                        } else {
+                            // Can't get filesystem modification time
+                            unverifiable_files.push(file_path.clone());
+                        }
+                    }
+                    _ => {
+                        // Can't compare modification times (missing data)
+                        unverifiable_files.push(file_path.clone());
+                    }
+                }
+            }
+            // Note: We don't include missing files here as this is specifically for freshness verification
+            // Missing files would be caught by the regular verify_archive method
+        }
+
+        Ok(FreshnessVerificationResult {
+            outdated_files,
+            up_to_date_files,
+            unverifiable_files,
+            total_checked: expanded_expected_files.len(),
         })
     }
 }
@@ -533,9 +648,69 @@ pub fn consolidate_missing_files(
     consolidated
 }
 
+/// Represents the result of comparing file modification times between filesystem and archive
+#[derive(Debug, Clone)]
+pub struct FreshnessVerificationResult {
+    /// Files that exist in both locations but are newer on the filesystem
+    pub outdated_files: Vec<OutdatedFile>,
+    /// Files that are up to date (archive version is same or newer than filesystem)
+    pub up_to_date_files: Vec<String>,
+    /// Files that couldn't be compared (missing modification time in archive or filesystem errors)
+    pub unverifiable_files: Vec<String>,
+    /// Total number of files checked
+    pub total_checked: usize,
+}
+
+/// Represents a file that is outdated in the archive
+#[derive(Debug, Clone)]
+pub struct OutdatedFile {
+    /// Path of the file
+    pub path: String,
+    /// Modification time in the archive
+    pub archive_modified: Option<SystemTime>,
+    /// Modification time on the filesystem
+    pub filesystem_modified: Option<SystemTime>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_freshness_verification_result() {
+        let result = FreshnessVerificationResult {
+            outdated_files: vec![OutdatedFile {
+                path: "test.txt".to_string(),
+                archive_modified: Some(SystemTime::UNIX_EPOCH),
+                filesystem_modified: Some(
+                    SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100),
+                ),
+            }],
+            up_to_date_files: vec!["current.txt".to_string()],
+            unverifiable_files: vec!["unknown.txt".to_string()],
+            total_checked: 3,
+        };
+
+        assert_eq!(result.outdated_files.len(), 1);
+        assert_eq!(result.up_to_date_files.len(), 1);
+        assert_eq!(result.unverifiable_files.len(), 1);
+        assert_eq!(result.total_checked, 3);
+    }
+
+    #[test]
+    fn test_outdated_file_structure() {
+        let outdated = OutdatedFile {
+            path: "test.txt".to_string(),
+            archive_modified: Some(SystemTime::UNIX_EPOCH),
+            filesystem_modified: Some(
+                SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(3600),
+            ),
+        };
+
+        assert_eq!(outdated.path, "test.txt");
+        assert!(outdated.archive_modified.is_some());
+        assert!(outdated.filesystem_modified.is_some());
+    }
 
     #[tokio::test]
     async fn test_seven_zip_verifier_is_available() {

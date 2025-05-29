@@ -5,7 +5,7 @@ mod services;
 mod verification;
 
 use clap::{Parser, Subcommand};
-use core::{Config, Result};
+use core::{ArchtreeError, Config, Result};
 use io::{FileReader, SevenZipArchiver, StdinReader};
 use processing::validation::FileSystemValidator;
 use services::BackupService;
@@ -71,6 +71,15 @@ enum Commands {
         /// Retry missing files by updating the archive
         #[arg(short = 'r', long = "retry")]
         retry: bool,
+
+        /// Check if archived files are up to date with filesystem versions
+        #[arg(long = "check-freshness")]
+        check_freshness: bool,
+
+        /// Update outdated files in the archive (requires --check-freshness)
+        /// This will automatically replace files in the archive with newer versions from the filesystem
+        #[arg(long = "update-outdated")]
+        update_outdated: bool,
     },
 }
 
@@ -93,7 +102,20 @@ async fn main() -> Result<()> {
             seven_zip_path,
             quiet,
             retry,
-        } => run_verify_command(archive, input_file, seven_zip_path, quiet, retry).await,
+            check_freshness,
+            update_outdated,
+        } => {
+            run_verify_command(
+                archive,
+                input_file,
+                seven_zip_path,
+                quiet,
+                retry,
+                check_freshness,
+                update_outdated,
+            )
+            .await
+        }
     }
 }
 
@@ -197,6 +219,8 @@ async fn run_verify_command(
     seven_zip_path: Option<String>,
     quiet: bool,
     retry: bool,
+    check_freshness: bool,
+    update_outdated: bool,
 ) -> Result<()> {
     // Build configuration
     let config = Config::builder()
@@ -233,6 +257,13 @@ async fn run_verify_command(
     // Create validator
     let validator = FileSystemValidator::new();
 
+    // Validate flag combinations
+    if update_outdated && !check_freshness {
+        return Err(ArchtreeError::config(
+            "--update-outdated requires --check-freshness to be enabled",
+        ));
+    }
+
     // Determine verification mode
     let mode = if retry {
         VerificationMode::VerifyWithRetry
@@ -244,17 +275,32 @@ async fn run_verify_command(
         eprintln!("🔍 Verifying archive: {}", archive);
     }
 
-    // Run verification
-    VerificationAndRetryService::verify(
-        &archive,
-        &input_paths,
-        &archiver,
-        &validator,
-        &verifier,
-        mode,
-        callback,
-    )
-    .await?;
+    // Run verification with optional freshness checking
+    if check_freshness {
+        VerificationAndRetryService::verify_with_freshness(
+            &archive,
+            &input_paths,
+            &archiver,
+            &validator,
+            &verifier,
+            mode,
+            check_freshness,
+            update_outdated,
+            callback,
+        )
+        .await?;
+    } else {
+        VerificationAndRetryService::verify(
+            &archive,
+            &input_paths,
+            &archiver,
+            &validator,
+            &verifier,
+            mode,
+            callback,
+        )
+        .await?;
+    }
 
     Ok(())
 }
